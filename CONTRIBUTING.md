@@ -33,7 +33,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-The browser checks run both the local page smoke and the synthetic Cycle 44 positive-target-misses regression fixture. The fixture blocks browser requests outside the workbench and fulfills API calls with synthetic data. Both launchers use the repository `.venv` interpreter automatically when present. To select another interpreter, set `PYTHON` explicitly: in POSIX shells use `PYTHON="$(pwd)/.venv/bin/python" npm run test:browser`; in PowerShell use `$env:PYTHON = (Resolve-Path .venv/Scripts/python.exe).Path` followed by `npm run test:browser`.
+The browser checks run the local page smoke, synthetic Cycle 44 positive-target-misses regression, and synthetic R03 first-use flow. The fixtures block browser requests outside the workbench and fulfill API calls with synthetic data. The R03 flow uses a fresh temporary SQLite database and does not contact Elasticsearch. Both launchers use the repository `.venv` interpreter automatically when present. To select another interpreter, set `PYTHON` explicitly: in POSIX shells use `PYTHON="$(pwd)/.venv/bin/python" npm run test:browser`; in PowerShell use `$env:PYTHON = (Resolve-Path .venv/Scripts/python.exe).Path` followed by `npm run test:browser`.
 
 ## Optional external checks
 

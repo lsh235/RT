@@ -2,6 +2,14 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.8.0] - 2026-10-19
+
+- Add a guided first-use path for Elasticsearch connection, field inspection, first search, human relevance judgments, and retrieval-mode comparison.
+- Distinguish explicitly imported sample data from existing indexes without inferring sample identity from document counts; sample import remains opt-in and targets a new index.
+- Add browser-local named connection profiles for non-secret settings, localized Korean and English onboarding/result guidance, and connection recovery messages.
+- Improve first-use keyboard focus and narrow-screen behavior, and add a synthetic browser regression flow to the default browser command.
+- Keep sample-corpus identity and redistribution rights separate from user-index and project-code licensing claims.
+
 ## [1.7.0] - 2026-10-19
 
 - Separate protected POST route dispatch, versioned local SQLite migrations, and per-file backup/restore helpers while retaining the loopback, authentication, CSRF, and owner-scope boundary.

@@ -88,6 +88,9 @@ const state = {
   connectionAttemptInProgress: false,
   locatorRequestId: 0,
   informationNeedPreviewGeneration: 0,
+  locale: "ko",
+  connectionGuidance: { keys: ["connectHint"], index: "" },
+  sampleImportedTarget: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -157,10 +160,120 @@ function getConnection() {
   } else if (authType === "api_key") {
     auth.api_key = $("#es-api-key").value;
   }
+  const url = safeEndpoint($("#es-url").value.trim());
+  if (!url) throw new Error("endpoint-userinfo");
   return {
-    url: $("#es-url").value.trim(),
+    url,
     auth,
   };
+}
+
+function safeEndpoint(value) {
+  try {
+    const parsed = new URL(value);
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password || parsed.search || parsed.hash) return "";
+    return parsed.toString().replace(/\/$/, "");
+  } catch { return ""; }
+}
+
+const UI_COPY = {
+  ko: {
+    endpointLabel: "Endpoint", authLabel: "인증 방식", authNone: "인증 없음", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "검색 인덱스", searchTitle: "검색 실험", searchIntro: "BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.", searchQuery: "검색 질의", searchButton: "검색", searchEmptyTitle: "검색 실험을 시작하세요", searchEmptyCopy: "Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.",
+    connectTitle: "Elasticsearch 연결", connectIntro: "연결 프로필에는 endpoint, 인덱스, 인증 방식만 저장합니다. 사용자 이름, 비밀번호, API 키는 저장하지 않습니다.", profilesTitle: "저장한 연결 프로필", noProfiles: "프로필 없음", profileLoad: "불러오기", profileSave: "현재 설정 저장", profileDelete: "선택 프로필 삭제", profileNote: "이 브라우저에 endpoint, 인덱스, 인증 방식만 저장합니다. 사용자 이름, 비밀번호, API 키는 저장하지 않습니다.", notConnected: "연결 전", connectHint: "먼저 연결하세요. 연결이 끝나면 인덱스 필드를 확인하고 첫 검색을 시작할 수 있습니다.", firstUsePath: "처음이라면 순서대로 진행하세요: 연결 → 필드 확인 및 적용 → 첫 검색 → 문서 관련도 저장 → 검색 모드 비교.", queryLabel: "어떤 내용을 찾고 싶나요?", firstSearchButton: "이 내용으로 결과 보기", queryHelp: "첫 질문은 설정 조정에 사용합니다. 다른 질문은 조정에 쓰지 않고 결과가 유지되는지 따로 확인할 수 있습니다.", modeHelp: "개념 검색은 선택한 필드에서 표현을 찾습니다. 벡터·혼합 검색은 ‘검색 실험’ 탭에서 계속 사용할 수 있습니다.",
+    connectLabel: "연결 확인", connecting: "연결 중", checking: "Elasticsearch 확인 중", connected: "연결됨", failed: "연결 실패", invalid: "Endpoint 주소를 확인하세요. 사용자 이름, 비밀번호, query string, fragment를 URL에 넣지 말고 인증 칸을 사용하세요.", unreachable: "Elasticsearch에 연결할 수 없습니다. 주소와 서비스 상태를 확인한 뒤 다시 시도하세요.", forbidden: "접근 권한이 없습니다 (403). 계정에 클러스터/인덱스 읽기 권한이 있는지 관리자에게 확인하세요.", emptyIndex: "인덱스가 비어 있습니다. 필드와 문서가 있는 인덱스를 선택하거나, 새 인덱스에서만 선택 사항인 샘플 가져오기를 사용할 수 있습니다.", ready: "연결했습니다. 1단계에서 필드를 확인하고, 첫 검색 후 문서 관련도를 직접 저장하세요.", vectorUnavailable: "벡터 검색은 아직 준비되지 않았습니다. 일반 검색은 사용할 수 있습니다. 호환 벡터 매핑, 로컬 런타임, 문서 임베딩이 필요합니다.", sample: "현재 세션에서 명시적으로 가져온 제공 샘플", realIndex: "선택한 기존 인덱스 · 샘플 정체 미확인", newIndex: "선택한 새 인덱스 대상", sampleOptional: "새 인덱스에서 제공된 샘플을 가져올 수 있습니다. 가져오기는 선택 사항이며 기존 인덱스에는 적재하지 않습니다.", fieldLoading: "{index} 필드와 예시 문서를 불러오는 중…", fieldLoadFailed: "필드와 예시 문서를 불러오지 못했습니다. 연결 권한과 인덱스를 확인한 뒤 다시 시도하세요.", fieldSummary: "추천 필드 · 확인 후 적용", titleField: "제목", textField: "본문", filterField: "필터", applyFields: "추천 필드 적용", inspectCriteria: "추천 기준", fieldList: "필드 목록 보기 · {count}개", noTitleCandidate: "직접 선택 필요", noFields: "없음", samplePicker: "예시 문서 선택", sampleDoc: "예시 {n} / {total}", sampleTitle: "제목", missingSampleTitle: "추천 제목 필드에 값이 없습니다. 문서 ID {id}를 표시합니다.", noSampleBody: "추천 본문 필드에서 표시할 값이 없습니다.", sampleCaveat: "아래 문서는 몇 개의 예시일 뿐입니다. 전체 인덱스의 필드 포함 여부, 검색 가능성 또는 관련성을 나타내지 않습니다.", transferQuery: "검색 시작 문구로 옮기기", editableQueryNote: "예시에서 만든 편집 가능한 시작 문구입니다. 내용을 다듬은 뒤 직접 ‘이 내용으로 결과 보기’를 선택하세요.", noSampleDocs: "예시 문서가 없습니다. 연결과 인덱스를 확인하세요.", fieldsLoaded: "{count}개 필드를 확인했습니다. 추천을 적용하거나 고급 설정에서 직접 고를 수 있습니다.", fieldsApplied: "추천 필드를 적용했습니다. 제목과 본문 필드를 확인한 뒤 검색하세요.", fieldsAppliedToast: "추천 필드를 입력란에 적용했습니다. 저장 전에 목록을 확인하세요.", fieldApplySummary: "적용할 필드: 제목 {title} · 본문 {text} · 조건 필드 {filters}", sampleMissing: "{index} 인덱스가 아직 없습니다. 제공된 샘플 {count}건을 이 새 인덱스에 적재할 수 있습니다. 가져오기는 선택 사항이며 기존 인덱스는 덮어쓰지 않습니다.", sampleExisting: "기존 인덱스 · 문서 {count}건 · 샘플 정체 미확인 · 기존 인덱스에는 샘플을 적재하지 않습니다.", sampleImportedStatus: "현재 세션에서 제공 샘플을 명시적으로 가져왔습니다 · 문서 {count}건.", sampleMeta: "첨부 메타데이터 {metadata}건 · NDJSON 샘플 {count}건", judgment: "문서별 관련도를 직접 판단해 저장하세요. 이 기록은 자동 채점이 아닙니다.", comparison: "평가 기록이 생기면 검색 실험 또는 평가 및 튜닝에서 같은 질의로 BM25, 벡터, 혼합 모드를 비교할 수 있습니다. 비교 결과가 품질을 자동으로 판정하지는 않습니다."
+  },
+  en: {
+    endpointLabel: "Endpoint URL", authLabel: "Authentication", authNone: "None", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "Search index", searchTitle: "Search experiments", searchIntro: "Compare BM25, dense vector, and RRF, or search the code index with Jira issues.", searchQuery: "Search query", searchButton: "Search", searchEmptyTitle: "Start a search experiment", searchEmptyCopy: "Connect to Elasticsearch and enter a question to view documents and scores from the selected index.",
+    connectTitle: "Connect Elasticsearch", connectIntro: "Profiles save only the endpoint, index, and authentication type. Usernames, passwords, and API keys are not saved.", profilesTitle: "Saved connection profiles", noProfiles: "No profiles", profileLoad: "Load", profileSave: "Save current settings", profileDelete: "Delete selected profile", profileNote: "Only the endpoint, index, and auth type are saved in this browser. Username, password, and API key are never saved.", notConnected: "Not connected", connectHint: "Connect first. Then inspect index fields and start your first search.", firstUsePath: "New here? Follow these steps: connect → inspect and apply fields → first search → save document relevance → compare search modes.", queryLabel: "What do you want to find?", firstSearchButton: "Show results for this query", queryHelp: "Your first query is used to tune settings. Try other queries separately to check whether results hold up.", modeHelp: "Concept search looks for terms in selected fields. Vector and hybrid search are available in the Search experiments tab.",
+    connectLabel: "Check connection", connecting: "Connecting", checking: "Checking Elasticsearch", connected: "Connected", failed: "Connection failed", invalid: "Check the endpoint URL. Do not put usernames, passwords, query strings, or fragments in the URL; use the authentication fields.", unreachable: "Elasticsearch could not be reached. Check the endpoint and service, then try again.", forbidden: "Access denied (403). Ask an administrator to check cluster and index read permissions.", emptyIndex: "This index is empty. Select an index with fields and documents, or use the optional sample import only for a new index.", ready: "Connected. Inspect fields in step 1, search, then save your own relevance judgment.", vectorUnavailable: "Vector search is not ready. Standard search remains available. A compatible vector mapping, local runtime, and document embeddings are required.", sample: "Supplied sample data explicitly imported in this session", realIndex: "Selected existing index · sample identity unverified", newIndex: "Selected new index target", sampleOptional: "You can import the supplied sample into a new index. Import is optional and never writes into an existing index.", fieldLoading: "Loading fields and example documents for {index}…", fieldLoadFailed: "Could not load fields and example documents. Check index access and try again.", fieldSummary: "Suggested fields · review before applying", titleField: "Title", textField: "Text", filterField: "Filter", applyFields: "Apply suggested fields", inspectCriteria: "How suggestions are chosen", fieldList: "View all {count} fields", noTitleCandidate: "Choose manually", noFields: "None", samplePicker: "Choose an example document", sampleDoc: "Example {n} / {total}", sampleTitle: "Title", missingSampleTitle: "The suggested title field has no value. Showing document ID {id}.", noSampleBody: "No values to show from the suggested text fields.", sampleCaveat: "These are a few examples. They do not represent field coverage, searchability, or relevance for the full index.", transferQuery: "Use as a starting query", editableQueryNote: "This editable query was assembled from the example. Revise it, then choose “Show results for this query”.", noSampleDocs: "No example documents are available. Check the connection and index.", fieldsLoaded: "Reviewed {count} fields. Apply the suggestions or choose fields in advanced settings.", fieldsApplied: "Suggested fields are applied. Review the title and text fields, then search.", fieldsAppliedToast: "Suggested fields are in the form. Review them before saving.", fieldApplySummary: "Fields to apply: title {title} · text {text} · filter {filters}", sampleMissing: "Index {index} does not exist yet. You may import {count} supplied sample documents into this new index. Import is optional; existing indexes are not overwritten.", sampleExisting: "Selected existing index · {count} documents · sample identity unverified · sample import is unavailable for existing indexes.", sampleImportedStatus: "Supplied sample explicitly imported in this session · {count} documents.", sampleMeta: "Attached metadata: {metadata} · sample NDJSON: {count}", judgment: "Judge each document's relevance and save it yourself. This is not automatic grading.", comparison: "After saving judgments, compare BM25, vector, and hybrid modes for the same query in Search experiments or Evaluation. The comparison does not automatically determine quality."
+  }
+};
+
+function copy(key) { return UI_COPY[state.locale]?.[key] || UI_COPY.ko[key] || key; }
+
+function sampleTargetKey(endpoint, index) {
+  return JSON.stringify([safeEndpoint(endpoint), String(index || "").trim()]);
+}
+
+function applyLocale(locale) {
+  state.locale = locale === "en" ? "en" : "ko";
+  document.documentElement.lang = state.locale;
+  $("#ui-language").value = state.locale;
+  $$('[data-i18n]').forEach(node => { const value = copy(node.dataset.i18n); if (value) node.textContent = value; });
+  $("#es-url").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch endpoint URL" : "Elasticsearch endpoint 주소");
+  $("#index-name").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch index name" : "Elasticsearch 인덱스 이름");
+  $("#connection-profile-name").placeholder = state.locale === "en" ? "Profile name" : "프로필 이름";
+  $("#connect-button").lastChild.textContent = ` ${copy("connectLabel")}`;
+  const { keys, index, identity } = state.connectionGuidance;
+  $("#connection-guidance").textContent = [...keys.map(copy), ...(index ? [`${copy(identity || "newIndex")}: ${index}.`] : [])].join(" ");
+  $("#load-sample-button").textContent = state.locale === "en" ? "Import supplied sample into this new index" : "제공 샘플을 새 인덱스에 가져오기";
+  if (state.sampleStatusInfo) renderSampleStatus(state.sampleStatusInfo);
+  if (state.quickstart) renderQuickstartResult(state.quickstart);
+  if (state.quickstartAppliedFields) renderAppliedQuickstartFields();
+  renderConnectionProfiles?.();
+  if (state.lastSearch?.result && state.lastSearch.mode !== "code_rag") renderSearch(state.lastSearch.result, state.lastSearch.query);
+  if (state.preview && state.preview.queryId) renderConceptPreview(state.preview, state.preview.queryId);
+  if (state.preview?.queryId) $("#concept-preview-status").textContent = `${state.locale === "en" ? "Search complete" : "비교 완료"} · ${state.preview.query || (state.locale === "en" ? "Saved query" : "저장된 질의")}`;
+}
+
+function setConnectionGuidance(keys, index = "", identity = "newIndex") {
+  state.connectionGuidance = { keys, index, identity };
+  $("#connection-guidance").textContent = [...keys.map(copy), ...(index ? [`${copy(identity)}: ${index}.`] : [])].join(" ");
+}
+
+const PROFILE_STORAGE_KEY = "es-rag-connection-profiles";
+function readConnectionProfiles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.filter(profile => profile && typeof profile.name === "string" && safeEndpoint(profile.url) && typeof profile.index === "string" && ["none", "basic", "api_key"].includes(profile.auth_type)) : [];
+  } catch { return []; }
+}
+
+function renderConnectionProfiles(selectedId = $("#connection-profile-select").value) {
+  const select = $("#connection-profile-select");
+  const profiles = readConnectionProfiles();
+  select.replaceChildren(new Option(copy("noProfiles"), ""));
+  for (const profile of profiles) select.add(new Option(profile.name, profile.id));
+  if (profiles.some(profile => profile.id === selectedId)) select.value = selectedId;
+  $("#delete-connection-profile").disabled = !select.value;
+}
+
+function saveConnectionProfile() {
+  const name = $("#connection-profile-name").value.trim();
+  const url = safeEndpoint($("#es-url").value.trim());
+  if (!url) { $("#profile-status").textContent = copy("invalid"); return; }
+  if (!name) { $("#profile-status").textContent = state.locale === "en" ? "Enter a profile name." : "프로필 이름을 입력하세요."; $("#connection-profile-name").focus(); return; }
+  const profiles = readConnectionProfiles();
+  const existing = profiles.find(profile => profile.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+  const profile = { id: existing?.id || crypto.randomUUID(), name, url, index: $("#index-name").value.trim(), auth_type: $("#auth-type").value };
+  const updated = [...profiles.filter(item => item.id !== profile.id), profile];
+  try {
+    localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(updated));
+    renderConnectionProfiles(profile.id);
+    $("#profile-status").textContent = state.locale === "en" ? "Saved in this browser. Credentials were not saved." : "이 브라우저에 저장했습니다. 인증정보는 저장하지 않았습니다.";
+  } catch { $("#profile-status").textContent = state.locale === "en" ? "Browser storage is unavailable." : "브라우저 저장소를 사용할 수 없습니다."; }
+}
+
+function loadConnectionProfile() {
+  const profile = readConnectionProfiles().find(item => item.id === $("#connection-profile-select").value);
+  if (!profile) return;
+  $("#es-url").value = safeEndpoint(profile.url);
+  $("#index-name").value = profile.index;
+  $("#auth-type").value = profile.auth_type;
+  $("#basic-fields").classList.toggle("hidden", profile.auth_type !== "basic");
+  $("#api-key-fields").classList.toggle("hidden", profile.auth_type !== "api_key");
+  $("#profile-status").textContent = state.locale === "en" ? "Settings loaded. Enter credentials again if required." : "설정을 불러왔습니다. 필요한 인증정보는 다시 입력하세요.";
+  saveNonSecretPreferences();
+  setConnected(false);
+  setConnectionStatus("idle", copy("notConnected"));
+}
+
+function deleteConnectionProfile() {
+  const id = $("#connection-profile-select").value;
+  if (!id) return;
+  localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(readConnectionProfiles().filter(profile => profile.id !== id)));
+  renderConnectionProfiles("");
+  $("#profile-status").textContent = state.locale === "en" ? "Profile deleted." : "프로필을 삭제했습니다.";
 }
 
 function requestPayload(extra = {}) {
@@ -312,7 +425,9 @@ async function refreshCodebaseStatus() {
 
 function saveNonSecretPreferences() {
   try {
-    localStorage.setItem("es-rag-url", $("#es-url").value.trim());
+    const url = safeEndpoint($("#es-url").value.trim());
+    if (url) localStorage.setItem("es-rag-url", url);
+    else localStorage.removeItem("es-rag-url");
     localStorage.setItem("es-rag-index", $("#index-name").value.trim());
     localStorage.setItem("es-rag-auth-type", $("#auth-type").value);
   } catch { /* Private browsing can disable localStorage. */ }
@@ -433,8 +548,9 @@ async function connect() {
   state.connectedIndexExists = false;
   renderSearchReadiness();
   updateModeComparisonGroupAction();
-  button.innerHTML = '<span class="spinner"></span> 연결 중';
-  setConnectionStatus("idle", "Elasticsearch 확인 중");
+  button.innerHTML = `<span class="spinner"></span> ${copy("connecting")}`;
+  setConnectionStatus("idle", copy("checking"));
+  setConnectionGuidance(["checking"]);
   $("#cluster-summary").classList.add("hidden");
   try {
     const result = await api("/api/connect", requestPayload());
@@ -445,7 +561,7 @@ async function connect() {
     state.connectedIndexExists = Boolean(result.selected_index_exists);
     populateIndexSuggestions(state.indices);
     setConnected(true);
-    setConnectionStatus("connected", "연결됨");
+    setConnectionStatus("connected", copy("connected"));
     const selected = escapeHtml(result.selected_index);
     const indexLine = result.selected_index_exists
       ? `${Number(result.selected_index_count).toLocaleString()}개 문서`
@@ -463,6 +579,11 @@ async function connect() {
     };
     renderSampleStatus(sample);
     renderEmbeddingStatus(state.embedding);
+    const empty = !result.selected_index_exists || Number(result.selected_index_count) === 0;
+    const vectorNotReady = !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== 1024 || !state.embedding?.runtime_installed || (Number(state.embedding?.document_count) > 0 && Number(state.embedding?.vector_count) === 0);
+    const guidanceKeys = [empty ? "emptyIndex" : "ready", ...(vectorNotReady ? ["vectorUnavailable"] : []), ...(!result.selected_index_exists ? ["sampleOptional"] : [])];
+    const identity = state.sampleImportedTarget === sampleTargetKey($("#es-url").value, result.selected_index) ? "sample" : result.selected_index_exists ? "realIndex" : "newIndex";
+    setConnectionGuidance(guidanceKeys, result.selected_index, identity);
     $("#concept-index-badge").textContent = result.selected_index;
     await loadConcepts();
     await loadCorpusSchema();
@@ -479,17 +600,21 @@ async function connect() {
     state.canImportSample = false;
     renderSampleOnboarding();
     renderSearchReadiness();
-    setConnectionStatus("error", "연결 실패");
+    setConnectionStatus("error", copy("failed"));
+    const recovery = error.message === "endpoint-userinfo" ? copy("invalid")
+      : error.status === 403 ? copy("forbidden")
+        : /invalid|url|scheme|endpoint/i.test(error.message) ? copy("invalid") : copy("unreachable");
+    setConnectionGuidance([error.message === "endpoint-userinfo" ? "invalid" : error.status === 403 ? "forbidden" : /invalid|url|scheme|endpoint/i.test(error.message) ? "invalid" : "unreachable"]);
     $("#sample-status").textContent = "Elasticsearch에 연결한 뒤 샘플 상태를 확인하세요.";
     $("#sample-status").className = "sample-status";
-    showToast(error.message, true);
+    showToast(recovery, true);
   } finally {
     state.connectionAttemptInProgress = false;
     advanceConnectionGeneration();
     updateModeComparisonGroupAction();
     button.disabled = false;
     refreshButton.disabled = false;
-    button.innerHTML = '<span class="button-icon">↗</span> 연결 확인';
+    button.innerHTML = `<span class="button-icon">↗</span> ${copy("connectLabel")}`;
   }
 }
 
@@ -645,19 +770,19 @@ async function vectorizeIndex() {
 }
 
 function renderSampleStatus(info) {
+  state.sampleStatusInfo = info;
   state.canImportSample = Boolean(info.can_import);
   state.sampleExpectedCount = Number(info.sample_expected_count) || 0;
   const status = $("#sample-status");
   if (!info.exists) {
     status.className = "sample-status";
-    status.innerHTML = `<strong>${escapeHtml(info.index)}</strong> 인덱스가 없습니다. 샘플 ${Number(info.sample_expected_count).toLocaleString()}건을 새로 적재할 수 있습니다.`;
+    status.innerHTML = `<strong>${escapeHtml(info.index)}</strong> ${copy("sampleMissing").replace("{index}", escapeHtml(info.index)).replace("{count}", Number(info.sample_expected_count).toLocaleString())}`;
   } else {
     status.className = "sample-status";
-    status.innerHTML = `<strong>${escapeHtml(info.index)}</strong>에 ${Number(info.document_count).toLocaleString()}개 문서가 있습니다. 기존 인덱스는 덮어쓰지 않습니다.`;
-    if (info.document_count === info.sample_expected_count) status.classList.add("success");
-    if (Number(info.metadata_count) !== Number(info.sample_expected_count)) {
-      status.innerHTML += `<br><span class="metadata-warning">첨부 메타데이터 ${escapeHtml(info.metadata_count)}건 · NDJSON 실제 ${escapeHtml(info.sample_expected_count)}건</span>`;
-    }
+    status.textContent = state.sampleImportedTarget === sampleTargetKey($("#es-url").value, info.index)
+      ? `${info.index}: ${copy("sampleImportedStatus").replace("{count}", Number(info.document_count).toLocaleString())}`
+      : `${info.index}: ${copy("sampleExisting").replace("{index}", escapeHtml(info.index)).replace("{count}", Number(info.document_count).toLocaleString())}`;
+    if (Number(info.metadata_count) !== Number(info.sample_expected_count)) status.innerHTML += `<br><span class="metadata-warning">${copy("sampleMeta").replace("{metadata}", escapeHtml(info.metadata_count)).replace("{count}", escapeHtml(info.sample_expected_count))}</span>`;
   }
   $("#load-sample-button").disabled = !state.connected || !state.canImportSample;
   renderSampleOnboarding();
@@ -670,17 +795,19 @@ function renderSampleOnboarding() {
   notice.classList.toggle("hidden", !available);
   if (!available) return;
   const count = Number.isFinite(state.sampleExpectedCount) ? state.sampleExpectedCount : 0;
-  $("#sample-onboarding-copy").textContent = `${index} 인덱스가 아직 없습니다. 샘플 ${count.toLocaleString()}건을 이 인덱스에 적재해 검색을 체험할 수 있습니다. 적재 전 확인 창에서 다시 검토합니다.`;
+  $("#sample-onboarding-copy").textContent = copy("sampleMissing").replace("{index}", index).replace("{count}", count.toLocaleString());
 }
 
 async function loadSample() {
   const button = $("#load-sample-button");
   if (!state.connected || !state.canImportSample) return;
-  if (!window.confirm(`새 인덱스 ${$("#index-name").value.trim()}를 만들고 테스트용 gRPC 이슈를 적재할까요?\n기존 인덱스는 덮어쓰지 않습니다.`)) return;
+  if (!window.confirm(state.locale === "en" ? `Create new index ${$("#index-name").value.trim()} and import the supplied sample?\nExisting indexes are never overwritten.` : `새 인덱스 ${$("#index-name").value.trim()}를 만들고 제공 샘플을 적재할까요?\n기존 인덱스는 덮어쓰지 않습니다.`)) return;
+  const requestedIndex = $("#index-name").value.trim();
   setBusy(button, true, "인덱스 생성 및 적재 중");
   $("#sample-status").textContent = "매핑 생성, Bulk 적재, refresh를 진행하고 있습니다…";
   try {
     const result = await api("/api/sample-import", requestPayload());
+    if (result.created === true && !result.partial) state.sampleImportedTarget = sampleTargetKey($("#es-url").value, result.index || requestedIndex);
     if (result.partial) {
       $("#sample-status").className = "sample-status error";
       $("#sample-status").textContent = `${result.message} 부분 적재 ${result.document_count ?? "확인 불가"}건.`;
@@ -1266,6 +1393,11 @@ function formatNumber(value, digits = 3) {
 }
 
 function localizeConceptWarning(value) {
+  const englishWarningCodes = {
+    score_not_probability: "Scores rank search results; they are not probabilities.",
+    lexical_candidate_evidence: "Expression evidence means the same text appears in a document. Missing evidence does not mean the document is irrelevant.",
+  };
+  if (state.locale === "en" && englishWarningCodes[value]) return englishWarningCodes[value];
   const warningCodes = {
     score_not_probability: "점수는 검색 순위를 매기는 값이며 확률을 뜻하지 않습니다.",
     lexical_candidate_evidence: "표현 근거는 문서에 같은 글자가 나타났다는 뜻입니다. 근거가 없더라도 문서가 무관하다는 뜻은 아닙니다.",
@@ -1284,8 +1416,8 @@ function localizeConceptWarning(value) {
   if (warningCodes[value]) return warningCodes[value];
   const message = typeof value === "string" ? value : JSON.stringify(value);
   const lower = message.toLowerCase();
-  if (lower.includes("scores are ranking scores, not probabilities")) return "점수는 검색 순위를 매기는 값이며 확률을 뜻하지 않습니다.";
-  if (lower.includes("lexical evidence is a surface-text match")) return "표현 근거는 문서에 같은 글자가 나타났다는 뜻입니다. 근거가 없더라도 문서가 무관하다는 뜻은 아닙니다.";
+  if (lower.includes("scores are ranking scores, not probabilities")) return state.locale === "en" ? "Scores rank search results; they are not probabilities." : "점수는 검색 순위를 매기는 값이며 확률을 뜻하지 않습니다.";
+  if (lower.includes("lexical evidence is a surface-text match")) return state.locale === "en" ? "Expression evidence means the same text appears in a document. Missing evidence does not mean the document is irrelevant." : "표현 근거는 문서에 같은 글자가 나타났다는 뜻입니다. 근거가 없더라도 문서가 무관하다는 뜻은 아닙니다.";
   if (lower.includes("older query version")) return "저장된 질의 문구가 이전 버전이라 해당 평가는 이번 비교에 연결하지 않았습니다. 문서를 다시 평가하세요.";
   if (lower.includes("pinned document") && lower.includes("could not be found")) return `고정한 문서를 현재 인덱스에서 찾지 못했습니다. ${message.match(/Pinned document (.+?) could not be found/i)?.[1] || "문서 ID를 확인하세요."}`;
   if (lower.includes("validation judgments are unavailable")) return "검증용으로 평가한 문서가 없어 일반화 여부를 확인할 수 없습니다. 현재 결과는 학습용 평가에만 해당합니다.";
@@ -1318,8 +1450,8 @@ async function runSearch() {
     if (readiness.blocked) return showToast(readiness.plain, true);
     if (readiness.requiresModelDownload && !window.confirm(`첫 질의 임베딩을 위해 ${state.embedding.model_name || "FastEmbed 모델"}을 약 2.24 GB 다운로드할 수 있습니다. 계속 검색할까요?`)) return;
   }
-  setBusy(button, true, "검색 중");
-  $("#search-results").innerHTML = `<div class="empty-state"><span class="loading-inline"><i class="spinner"></i> ${mode === "code_rag" ? "Jira와 gRPC 코드 색인 검색 중" : "Elasticsearch 검색 중"}</span></div>`;
+  setBusy(button, true, state.locale === "en" ? "Searching" : "검색 중");
+  $("#search-results").innerHTML = `<div class="empty-state"><span class="loading-inline"><i class="spinner"></i> ${state.locale === "en" ? (mode === "code_rag" ? "Searching Jira and the gRPC code index" : "Searching Elasticsearch") : (mode === "code_rag" ? "Jira와 gRPC 코드 색인 검색 중" : "Elasticsearch 검색 중")}</span></div>`;
   $("#search-summary").classList.add("hidden");
   try {
     const payload = requestPayload({ query, size: Number($("#search-size").value), boosts: readBoosts(), filters: readFilters(), mode, rank_constant: Number($("#rank-constant").value) });
@@ -1333,10 +1465,11 @@ async function runSearch() {
       renderSearch(result, query);
     }
   } catch (error) {
-    $("#search-results").innerHTML = `<div class="notice notice-error">${escapeHtml(error.message)}</div>`;
-    showToast(error.message, true);
+    const message = state.locale === "en" ? "Search failed. Check the connection, index, and permissions, then retry." : error.message;
+    $("#search-results").innerHTML = `<div class="notice notice-error" role="status" aria-live="polite">${escapeHtml(message)}</div>`;
+    showToast(message, true);
   } finally {
-    button.innerHTML = '<span>검색</span><kbd>↵</kbd>';
+    button.innerHTML = `<span>${state.locale === "en" ? "Search" : "검색"}</span><kbd>↵</kbd>`;
     button.disabled = !state.connected;
   }
 }
@@ -1368,14 +1501,15 @@ function renderCodeRag(result, query) {
 }
 
 function renderSearch(result, query) {
+  const english = state.locale === "en";
   const summary = $("#search-summary");
   const method = { bm25: "BM25", vector: "dense vector", hybrid: `RRF hybrid · k=${result.query.rank_constant}` }[result.mode] || "검색";
-  summary.innerHTML = `<strong>${Number(result.total).toLocaleString()}</strong>개 문서 일치 <span>·</span><span>${method}</span><span>·</span><span>실행 시간 ${escapeHtml(result.took_ms ?? "—")} ms</span><span class="spacer"></span><span>질의 분석</span><details><summary>DSL</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.query, null, 2))}</pre></details>${scoreGuidance(result.mode)}`;
+  summary.innerHTML = `<strong>${Number(result.total).toLocaleString()}</strong>${english ? " documents matched" : "개 문서 일치"} <span>·</span><span>${method}</span><span>·</span><span>${english ? "Elapsed" : "실행 시간"} ${escapeHtml(result.took_ms ?? "—")} ms</span><span class="spacer"></span><span>${english ? "Query details" : "질의 분석"}</span><details><summary>DSL</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.query, null, 2))}</pre></details>${scoreGuidance(result.mode)}`;
   summary.classList.remove("hidden");
   const sharedUnavailable = result.shared_search?.state === "unavailable";
   const sharedHtml = sharedUnavailable
-    ? `<div class="notice notice-muted">${escapeHtml(result.shared_search.message || "공유 인덱스 검색을 사용할 수 없습니다.")}</div>`
-    : result.hits.length ? result.hits.map((hit, index) => renderHit(hit, index, query, true)).join("") : '<div class="empty-state compact-empty"><p>선택한 공유 Elasticsearch 인덱스에서 결과가 없습니다.</p></div>';
+    ? `<div class="notice notice-muted">${escapeHtml(english ? "Shared-index search is unavailable. Check search permissions and readiness." : result.shared_search.message || "공유 인덱스 검색을 사용할 수 없습니다.")}</div>`
+    : result.hits.length ? result.hits.map((hit, index) => renderHit(hit, index, query, true)).join("") : `<div class="empty-state compact-empty"><p>${english ? "No results in the selected Elasticsearch index." : "선택한 공유 Elasticsearch 인덱스에서 결과가 없습니다."}</p></div>`;
   const privateLane = result.private_knowledge || {};
   const privateHits = privateLane.results || [];
   const privateHtml = privateHits.length ? privateHits.map((hit, index) => {
@@ -1388,12 +1522,20 @@ function renderSearch(result, query) {
       : `<div class="notice notice-muted">${privateLane.state === "unsupported_mode" ? `내 비공개 지식은 ${escapeHtml(privateLane.supported_mode || "BM25")} 검색만 지원합니다. 현재 ${escapeHtml(privateLane.mode || result.mode)} 결과에는 포함되지 않았습니다.` : "비공개 문서가 아직 동기화되지 않았거나 동기화가 실패했습니다. 결과를 숨겼습니다. ‘내 지식’ 화면에서 동기화/재시도를 선택하세요."}</div>`;
   const privateMode = privateLane.mode || "bm25";
   const privateMethod = { bm25: "BM25", vector: "E5 vector", hybrid: "RRF hybrid" }[privateMode] || "비공개 검색";
-  const privateNote = privateLane.state === "in_sync" ? `${privateMethod} 결과는 별도 계정 비공개 lane입니다. 공유 결과와 합치지 않습니다. ${privateMode === "hybrid" ? "RRF는 순위를 결합하며 원점수를 더하지 않습니다." : "점수는 확률이나 품질 검증 결과가 아닙니다."}` : privateLane.message || "비공개 검색 상태를 확인할 수 없습니다. 내 지식 화면에서 모델, 매핑, 동기화 상태를 확인하세요.";
-  const sharedLabel = sharedUnavailable ? "검색을 사용할 수 없음" : `${Number(result.total).toLocaleString()}개 · ${method}`;
-  $("#search-results").innerHTML = `<section class="evidence-section"><div class="evidence-section-heading"><h3>선택한 공유 인덱스</h3><span>${sharedLabel}</span></div>${sharedHtml}</section><section class="evidence-section"><div class="evidence-section-heading"><h3>내 비공개 지식 · ${privateMethod}</h3><span>${privateHits.length}개 · 별도 순위</span></div>${privateHtml}<p class="helper-text">${escapeHtml(privateNote)}</p></section>`;
+  const privateNote = english ? (privateLane.state === "in_sync" ? `${privateMethod} results are a separate account-private lane and are not merged with shared results. Scores are not probabilities or quality proof.` : "Private search is unavailable. Check model, mapping, and sync status under Private knowledge.") : privateLane.state === "in_sync" ? `${privateMethod} 결과는 별도 계정 비공개 lane입니다. 공유 결과와 합치지 않습니다. ${privateMode === "hybrid" ? "RRF는 순위를 결합하며 원점수를 더하지 않습니다." : "점수는 확률이나 품질 검증 결과가 아닙니다."}` : privateLane.message || "비공개 검색 상태를 확인할 수 없습니다. 내 지식 화면에서 모델, 매핑, 동기화 상태를 확인하세요.";
+  const sharedLabel = sharedUnavailable ? (english ? "Unavailable" : "검색을 사용할 수 없음") : `${Number(result.total).toLocaleString()}${english ? " matches" : "개"} · ${method}`;
+  $("#search-results").innerHTML = `<section class="evidence-section"><div class="evidence-section-heading"><h3>${english ? "Selected shared index" : "선택한 공유 인덱스"}</h3><span>${sharedLabel}</span></div>${sharedHtml}</section><section class="evidence-section"><div class="evidence-section-heading"><h3>${english ? `Private knowledge · ${privateMethod}` : `내 비공개 지식 · ${privateMethod}`}</h3><span>${privateHits.length}${english ? " · separate ranking" : "개 · 별도 순위"}</span></div>${privateHtml}<p class="helper-text">${escapeHtml(privateNote)}</p></section>`;
 }
 
 function scoreGuidance(mode) {
+  if (state.locale === "en") {
+    const guidance = {
+      bm25: "BM25 is this search's text-match score, not a probability or a human relevance judgment. Do not compare it directly with scores from other search modes.",
+      vector: "Vector score reflects the selected embedding and similarity settings. It is not a probability or a human relevance judgment, and it is not directly comparable with BM25 or another model.",
+      hybrid: "RRF combines result ranks; it does not add raw BM25 and vector scores. RRF is not a probability or a human relevance judgment."
+    };
+    return `<span class="score-guidance">${guidance[mode] || guidance.bm25}</span>`;
+  }
   const guidance = {
     bm25: "BM25 점수는 이 검색의 텍스트 일치 점수입니다. 확률이나 사용자 관련도 등급이 아니며, 다른 검색 방식의 점수와 직접 비교할 수 없습니다.",
     vector: "벡터 점수는 선택한 임베딩·유사도 설정의 유사도 점수입니다. 확률이나 사용자 관련도 등급이 아니며, BM25나 다른 모델 설정의 점수와 직접 비교할 수 없습니다.",
@@ -1413,6 +1555,7 @@ function capResultTitle(value) {
 }
 
 function renderHit(hit, index, query, allowMappedTitle = false) {
+  const english = state.locale === "en";
   const source = hit._source || {};
   const selectedIndex = $("#index-name").value.trim();
   const requestedIndex = state.lastSearch?.index || selectedIndex;
@@ -1426,14 +1569,14 @@ function renderHit(hit, index, query, allowMappedTitle = false) {
     }
   }
   if (!displayTitle) displayTitle = displayTitleScalar(source.summary);
-  if (!displayTitle) displayTitle = "제목 없음";
+  if (!displayTitle) displayTitle = english ? "Untitled document" : "제목 없음";
   displayTitle = capResultTitle(displayTitle);
   const issueKey = source.issue_key || hit._id;
   const components = Array.isArray(source.components) ? source.components : source.components ? [source.components] : [];
   const comments = hit.inner_hits?.comments?.hits?.hits || [];
-  const commentHtml = comments.slice(0, 2).map((comment) => `<div class="hit-section"><strong>댓글 매치</strong>${escapeHtml(comment._source?.body || "")}</div>`).join("");
+  const commentHtml = comments.slice(0, 2).map((comment) => `<div class="hit-section"><strong>${english ? "Matching comment" : "댓글 매치"}</strong>${escapeHtml(comment._source?.body || "")}</div>`).join("");
   const scoreLabel = state.lastSearch?.result?.mode === "hybrid" ? "RRF SCORE" : state.lastSearch?.result?.mode === "vector" ? "VECTOR SCORE" : "BM25 SCORE";
-  const componentScores = hit.retrieval_scores ? `<div class="hit-section"><strong>원점수</strong>BM25 ${hit.retrieval_scores.bm25 == null ? "—" : formatNumber(hit.retrieval_scores.bm25, 4)} · Vector ${hit.retrieval_scores.vector == null ? "—" : formatNumber(hit.retrieval_scores.vector, 4)}</div>` : "";
+  const componentScores = hit.retrieval_scores ? `<div class="hit-section"><strong>${english ? "Raw scores" : "원점수"}</strong>BM25 ${hit.retrieval_scores.bm25 == null ? "—" : formatNumber(hit.retrieval_scores.bm25, 4)} · Vector ${hit.retrieval_scores.vector == null ? "—" : formatNumber(hit.retrieval_scores.vector, 4)}</div>` : "";
   const highlightHtml = renderResultHighlights(hit.highlight, state.lastSearch?.result?.mode, hit.retrieval_scores);
   return `<article class="hit-card" data-hit-id="${escapeHtml(hit._id)}" data-hit-index="${escapeHtml(documentIndex)}">
     <div class="hit-head"><div class="hit-title-wrap"><span class="issue-key">${escapeHtml(issueKey)}</span><h3 class="hit-title">${escapeHtml(displayTitle)}</h3></div><div class="score-box"><div class="score-label">${scoreLabel} · #${index + 1}</div><div class="score-value">${formatNumber(hit._score, 4)}</div></div></div>
@@ -1443,7 +1586,7 @@ function renderHit(hit, index, query, allowMappedTitle = false) {
     ${componentScores}
     ${highlightHtml}
     ${commentHtml}
-    <div class="hit-actions"><button data-stage-ai-result="" data-index="${escapeHtml(documentIndex)}">AI 도우미에게 이 결과 묻기</button><button data-open-document="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">문서 · 청크 랩</button>${state.lastSearch?.result?.mode !== "vector" ? `<button data-explain="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">${state.lastSearch?.result?.mode === "hybrid" ? "BM25 점수 설명" : "점수 설명"}</button>` : ""}${source.source_url ? `<a href="${escapeHtml(source.source_url)}" target="_blank" rel="noreferrer">원본 ↗</a>` : ""}</div>
+    <div class="hit-actions"><button data-stage-ai-result="" data-index="${escapeHtml(documentIndex)}">${english ? "Ask AI about this result" : "AI 도우미에게 이 결과 묻기"}</button><button data-open-document="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">${english ? "Document and chunk lab" : "문서 · 청크 랩"}</button>${state.lastSearch?.result?.mode !== "vector" ? `<button data-explain="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">${english ? (state.lastSearch?.result?.mode === "hybrid" ? "Explain BM25 score" : "Explain score") : state.lastSearch?.result?.mode === "hybrid" ? "BM25 점수 설명" : "점수 설명"}</button>` : ""}${source.source_url ? `<a href="${escapeHtml(source.source_url)}" target="_blank" rel="noreferrer">${english ? "Source ↗" : "원본 ↗"}</a>` : ""}</div>
   </article>`;
 }
 
@@ -1980,43 +2123,68 @@ async function loadCorpusSchema() {
 }
 
 async function runQuickstart() {
-  if (!state.connected) return showToast("먼저 Elasticsearch 연결을 확인하세요.", true);
+  if (!state.connected) return showToast(state.locale === "en" ? "Check the Elasticsearch connection first." : "먼저 Elasticsearch 연결을 확인하세요.", true);
   const button = $("#quickstart-fields");
   button.disabled = true;
-  $("#quickstart-preview").innerHTML = '<span class="loading-inline"><i class="spinner"></i> 필드와 예시 문서를 확인하고 있습니다.</span>';
+  $("#quickstart-preview").innerHTML = `<span class="loading-inline"><i class="spinner"></i> ${copy("fieldLoading").replace("{index}", escapeHtml(state.connectedIndex || $("#index-name").value.trim()))}</span>`;
   try {
     const result = await api("/api/concepts/quickstart", requestPayload());
     state.quickstart = result;
     state.quickstartSampleIndex = 0;
+    state.quickstartAppliedFields = false;
     state.schema = result.fields || [];
     state.schemaIndex = result.index || $("#index-name").value.trim();
-    const suggestedTexts = result.suggested_text_fields || [];
-    const suggestedTitle = result.suggested_title_field || "";
-    const filterTypes = new Set(["keyword", "constant_keyword", "integer", "long", "short", "byte", "boolean", "date", "ip"]);
-    const suggestedFilters = result.suggested_filter_fields || state.schema.filter((field) => filterTypes.has(field.type)).map((field) => field.name);
-    const describeFields = (names) => names.map((name) => {
-      const field = state.schema.find((candidate) => candidate.name === name);
-      return field ? `${name} (${field.type})` : name;
-    }).join(", ");
-    const fieldsLine = `제목: ${describeFields(suggestedTitle ? [suggestedTitle] : []) || "직접 선택 필요"} · 본문: ${describeFields(suggestedTexts) || "없음"} · 필터: ${describeFields(suggestedFilters) || "없음"}`;
-    const samples = (result.sample_documents || []).slice(0, 3);
-    const mappingNames = state.schema.map((field) => `${field.name} (${field.type})`);
-    const warningText = localizedConceptWarnings(result).map(escapeHtml).join(" · ");
-    $("#quickstart-preview").innerHTML = `<div class="quickstart-preview-grid"><div class="quickstart-fields-summary"><strong>추천 필드 · 확인 후 적용</strong><span>${escapeHtml(fieldsLine)}</span><button type="button" id="apply-quickstart-fields" class="button button-secondary button-small quickstart-confirm">추천 필드 적용</button><details class="quickstart-mapping-details quickstart-guidance"><summary>추천 기준</summary><p>이 앱의 매핑 이름·타입 규칙에 따른 후보이며, 의미에 맞는 필드인지 자동으로 판단하지 않습니다. 중첩 필드는 이 워크벤치의 제목 검증에서 제외됩니다.</p><ul><li>제목: 검색 가능한 비중첩 필드 중 title, summary, subject, headline, name 이름을 우선 추천합니다. 없으면 중첩되지 않은 검색 가능 필드에서 후보를 고릅니다.</li><li>본문: text, match_only_text, search_as_you_type 타입을 우선합니다. 이런 타입이 없을 때만 앱에서 검색 가능하다고 판단한 필드로 넓힙니다. 이 fallback은 keyword를 포함할 수 있으며, 전문 검색용 text 필드와 같지 않습니다.</li><li>필터: keyword, constant_keyword, 숫자, boolean, date, ip 등 앱이 필터 가능으로 분류하는 매핑 타입을 후보로 표시합니다.</li></ul><p>아래 몇 개의 _source 예시는 필드 값만 보여 주며, 매핑의 검색 가능성이나 검색 적합성을 증명하지 않습니다.</p></details><details class="quickstart-mapping-details"><summary>필드 목록 보기 · ${mappingNames.length}개</summary><p>제목 후보: ${escapeHtml(describeFields(suggestedTitle ? [suggestedTitle] : []) || "없음")}</p><p>본문 후보: ${escapeHtml(describeFields(suggestedTexts) || "없음")}</p><p>필터 후보: ${escapeHtml(describeFields(suggestedFilters) || "없음")}</p><ul>${mappingNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul></details></div><div class="quickstart-sample-column">${samples.length > 1 ? `<label class="quickstart-sample-picker" for="quickstart-sample-select">예시 문서 선택<select id="quickstart-sample-select" class="text-input" aria-controls="quickstart-sample-panel">${samples.map((sample, index) => `<option value="${index}">예시 ${index + 1} · ${escapeHtml(sample._id || "ID 없음")}</option>`).join("")}</select></label>` : ""}<div id="quickstart-sample-panel">${renderQuickstartSample(samples, state.quickstartSampleIndex, suggestedTitle, suggestedTexts, result.index)}</div><p class="quickstart-sample-caveat">아래 문서는 몇 개의 예시일 뿐입니다. 전체 인덱스의 필드 포함 여부, 검색 가능성 또는 관련성을 나타내지 않습니다.</p></div></div>${warningText ? `<p class="notice notice-muted">${warningText}</p>` : ""}`;
-    $("#quickstart-preview").dataset.suggestions = JSON.stringify({ title_field: suggestedTitle, text_fields: suggestedTexts, filter_fields: suggestedFilters, index: result.index || $("#index-name").value.trim() });
+    renderQuickstartResult(result);
     renderSchemaChoices({ index: result.index, title_field: $("#concept-title-field").value, text_fields: [...$("#concept-text-fields").querySelectorAll("input:checked")].map((input) => input.value), filter_fields: [...$("#concept-filter-fields").querySelectorAll("input:checked")].map((input) => input.value) });
     renderConceptFilterRows();
-    if (!state.conceptId) $("#schema-status").textContent = `${state.schema.length}개 필드를 확인했습니다. 추천을 적용하거나 고급 설정에서 직접 고를 수 있습니다.`;
+    if (!state.conceptId) $("#schema-status").textContent = copy("fieldsLoaded").replace("{count}", state.schema.length);
     await loadAiStatus();
   } catch (error) {
-    $("#quickstart-preview").innerHTML = `<p class="notice notice-error">${escapeHtml(error.message)}</p>`;
+    $("#quickstart-preview").innerHTML = `<p class="notice notice-error">${copy("fieldLoadFailed")}</p>`;
   } finally { button.disabled = !state.connected; }
+}
+
+function renderQuickstartResult(result) {
+  if (!result) return;
+  const suggestedTexts = result.suggested_text_fields || [];
+  const suggestedTitle = result.suggested_title_field || "";
+  const filterTypes = new Set(["keyword", "constant_keyword", "integer", "long", "short", "byte", "boolean", "date", "ip"]);
+  const suggestedFilters = result.suggested_filter_fields || state.schema.filter((field) => filterTypes.has(field.type)).map((field) => field.name);
+  const describeFields = (names) => names.map((name) => {
+    const field = state.schema.find((candidate) => candidate.name === name);
+    return field ? `${name} (${field.type})` : name;
+  }).join(", ");
+  const fieldsLine = `${copy("titleField")}: ${describeFields(suggestedTitle ? [suggestedTitle] : []) || copy("noTitleCandidate")} · ${copy("textField")}: ${describeFields(suggestedTexts) || copy("noFields")} · ${copy("filterField")}: ${describeFields(suggestedFilters) || copy("noFields")}`;
+  const samples = (result.sample_documents || []).slice(0, 3);
+  const mappingNames = state.schema.map((field) => `${field.name} (${field.type})`);
+  const rules = state.locale === "en"
+    ? `<p>Suggestions follow this app's mapping-name and type rules; they do not determine semantic fit. Nested fields are excluded from title validation.</p><ul><li>Title: searchable, non-nested fields named title, summary, subject, headline, or name are preferred.</li><li>Text: text, match_only_text, and search_as_you_type are preferred. Fallbacks may include keyword fields and are not equivalent to full-text fields.</li><li>Filters: keyword, numeric, boolean, date, and IP mapping types may be suggested.</li></ul><p>Example _source values do not prove mapping searchability or suitability.</p>`
+    : `<p>이 앱의 매핑 이름·타입 규칙에 따른 후보이며, 의미에 맞는 필드인지 판단하지 않습니다. 중첩 필드는 제목 검증에서 제외됩니다.</p><ul><li>제목: 검색 가능한 비중첩 필드 중 title, summary, subject, headline, name 이름을 우선합니다.</li><li>본문: text, match_only_text, search_as_you_type를 우선합니다. 대체 후보에는 keyword가 포함될 수 있으며 전문 검색 필드와 같지 않습니다.</li><li>필터: keyword, 숫자, boolean, date, ip 타입을 후보로 표시합니다.</li></ul><p>예시 _source 값은 매핑의 검색 가능성이나 적합성을 증명하지 않습니다.</p>`;
+  const preview = $("#quickstart-preview");
+  preview.innerHTML = `<div class="quickstart-preview-grid"><div class="quickstart-fields-summary"><strong>${copy("fieldSummary")}</strong><span>${escapeHtml(fieldsLine)}</span><button type="button" id="apply-quickstart-fields" class="button button-secondary button-small quickstart-confirm">${copy("applyFields")}</button><details class="quickstart-mapping-details quickstart-guidance"><summary>${copy("inspectCriteria")}</summary>${rules}</details><details class="quickstart-mapping-details"><summary>${copy("fieldList").replace("{count}", mappingNames.length)}</summary><p>${copy("titleField")}: ${escapeHtml(describeFields(suggestedTitle ? [suggestedTitle] : []) || copy("noFields"))}</p><p>${copy("textField")}: ${escapeHtml(describeFields(suggestedTexts) || copy("noFields"))}</p><p>${copy("filterField")}: ${escapeHtml(describeFields(suggestedFilters) || copy("noFields"))}</p><ul>${mappingNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul></details></div><div class="quickstart-sample-column">${samples.length > 1 ? `<label class="quickstart-sample-picker" for="quickstart-sample-select">${copy("samplePicker")}<select id="quickstart-sample-select" class="text-input" aria-controls="quickstart-sample-panel">${samples.map((sample, index) => `<option value="${index}">${copy("sampleDoc").replace("{n}", index + 1).replace("{total}", samples.length)} · ${escapeHtml(sample._id || "ID")}</option>`).join("")}</select></label>` : ""}<div id="quickstart-sample-panel">${renderQuickstartSample(samples, state.quickstartSampleIndex, suggestedTitle, suggestedTexts, result.index)}</div><p class="quickstart-sample-caveat">${copy("sampleCaveat")}</p></div></div>`;
+  preview.dataset.suggestions = JSON.stringify({ title_field: suggestedTitle, text_fields: suggestedTexts, filter_fields: suggestedFilters, index: result.index || $("#index-name").value.trim() });
+  if (state.quickstartAppliedFields) renderAppliedQuickstartFields();
+}
+
+function renderAppliedQuickstartFields() {
+  if (!state.quickstartAppliedFields) return;
+  const summary = $("#quickstart-preview .quickstart-fields-summary");
+  if (!summary) return;
+  summary.querySelector(".selected-field-confirmation")?.remove();
+  const currentTitle = $("#concept-title-field").value;
+  const currentText = [...$("#concept-text-fields").querySelectorAll("input:checked")].map((input) => input.value);
+  const currentFilters = [...$("#concept-filter-fields").querySelectorAll("input:checked")].map((input) => input.value);
+  const summaryLine = copy("fieldApplySummary")
+    .replace("{title}", escapeHtml(currentTitle || copy("noFields")))
+    .replace("{text}", escapeHtml(currentText.join(", ") || copy("noFields")))
+    .replace("{filters}", escapeHtml(currentFilters.join(", ") || copy("noFields")));
+  summary.insertAdjacentHTML("beforeend", `<span class="selected-field-confirmation">${summaryLine}</span>`);
 }
 
 function renderQuickstartSample(samples, sampleIndex, suggestedTitle, suggestedTexts, indexName) {
   const samplesToShow = (samples || []).slice(0, 3);
   const sample = samplesToShow[sampleIndex];
-  if (!sample) return '<div class="quickstart-sample"><p>예시 문서가 없습니다. 연결과 인덱스를 확인하세요.</p></div>';
+  if (!sample) return `<div class="quickstart-sample"><p>${copy("noSampleDocs")}</p></div>`;
   const titleSource = state.schema.find((field) => field.name === suggestedTitle)?.source_field || suggestedTitle || "";
   const titleValues = sourcePathValues(sample.source || {}, titleSource);
   const bodyValues = suggestedTexts.flatMap((fieldName) => {
@@ -2024,9 +2192,9 @@ function renderQuickstartSample(samples, sampleIndex, suggestedTitle, suggestedT
     return sourcePathValues(sample.source || {}, sourceField).slice(0, 1).map((value) => [fieldName, value]);
   }).slice(0, 2);
   const starterPhrase = quickstartStarterPhrase(titleValues, bodyValues);
-  const docId = sample._id == null ? "ID 없음" : String(sample._id);
-  const docIndex = sample._index || indexName || "인덱스 없음";
-  return `<div class="quickstart-sample" aria-live="polite"><h4>예시 ${sampleIndex + 1} / ${samplesToShow.length} · ${escapeHtml(docIndex)} / ${escapeHtml(docId)}</h4>${titleValues.length ? `<p class="sample-title-excerpt"><strong>${escapeHtml(suggestedTitle || "제목")}:</strong> ${escapeHtml(String(titleValues[0]).slice(0, 220))}</p>` : `<p class="sample-title-excerpt">추천 제목 필드에 값이 없습니다. 문서 ID ${escapeHtml(docId)}를 표시합니다.</p>`}${bodyValues.map(([field, value]) => `<p><strong>${escapeHtml(field)}:</strong> ${escapeHtml(String(value).slice(0, 420))}</p>`).join("") || '<p>추천 본문 필드에서 표시할 값이 없습니다.</p>'}${starterPhrase ? `<button type="button" class="button button-secondary button-small quickstart-query-handoff" data-starter-phrase="${escapeHtml(starterPhrase)}">검색 시작 문구로 옮기기</button><p class="quickstart-handoff-help">예시에서 만든 편집 가능한 시작 문구입니다. 내용을 다듬은 뒤 직접 ‘이 내용으로 결과 보기’를 선택하세요.</p>` : ""}</div>`;
+  const docId = sample._id == null ? "ID" : String(sample._id);
+  const docIndex = sample._index || indexName || "";
+  return `<div class="quickstart-sample" aria-live="polite"><h4>${copy("sampleDoc").replace("{n}", sampleIndex + 1).replace("{total}", samplesToShow.length)} · ${escapeHtml(docIndex)} / ${escapeHtml(docId)}</h4>${titleValues.length ? `<p class="sample-title-excerpt"><strong>${escapeHtml(suggestedTitle || copy("sampleTitle"))}:</strong> ${escapeHtml(String(titleValues[0]).slice(0, 220))}</p>` : `<p class="sample-title-excerpt">${copy("missingSampleTitle").replace("{id}", escapeHtml(docId))}</p>`}${bodyValues.map(([field, value]) => `<p><strong>${escapeHtml(field)}:</strong> ${escapeHtml(String(value).slice(0, 420))}</p>`).join("") || `<p>${copy("noSampleBody")}</p>`}${starterPhrase ? `<button type="button" class="button button-secondary button-small quickstart-query-handoff" data-starter-phrase="${escapeHtml(starterPhrase)}">${copy("transferQuery")}</button><p class="quickstart-handoff-help">${copy("editableQueryNote")}</p>` : ""}</div>`;
 }
 
 function quickstartStarterPhrase(titleValues, bodyValues) {
@@ -2074,19 +2242,13 @@ function applyQuickstartFields() {
   let suggestions;
   try { suggestions = JSON.parse($("#quickstart-preview").dataset.suggestions || "{}"); } catch { suggestions = {}; }
   if (!state.quickstart) return;
-  if (state.conceptId) return showToast("저장된 개념의 필드는 고급 설정에서 직접 확인해 바꾸세요.", true);
+  if (state.conceptId) return showToast(state.locale === "en" ? "Review saved concept fields in advanced settings." : "저장된 개념의 필드는 고급 설정에서 직접 확인해 바꾸세요.", true);
   renderSchemaChoices({ title_field: suggestions.title_field, text_fields: suggestions.text_fields || [], filter_fields: suggestions.filter_fields || [] });
   renderConceptFilterRows();
-  const currentTitle = $("#concept-title-field").value;
-  const currentText = [...$("#concept-text-fields").querySelectorAll("input:checked")].map((input) => input.value);
-  const currentFilters = [...$("#concept-filter-fields").querySelectorAll("input:checked")].map((input) => input.value);
-  const summary = $("#quickstart-preview .quickstart-fields-summary");
-  if (summary) {
-    summary.querySelector(".selected-field-confirmation")?.remove();
-    summary.insertAdjacentHTML("beforeend", `<span class="selected-field-confirmation">적용할 필드: 제목 ${escapeHtml(currentTitle || "선택 안 함")} · 본문 ${escapeHtml(currentText.join(", ") || "선택 안 함")} · 조건 필드 ${escapeHtml(currentFilters.join(", ") || "없음")}</span>`);
-  }
-  $("#schema-status").textContent = "추천 필드를 적용했습니다. 제목과 본문 필드를 확인한 뒤 검색하세요.";
-  showToast("추천 필드를 입력란에 적용했습니다. 저장 전에 목록을 확인하세요.");
+  state.quickstartAppliedFields = true;
+  renderAppliedQuickstartFields();
+  $("#schema-status").textContent = copy("fieldsApplied");
+  showToast(copy("fieldsAppliedToast"));
 }
 
 async function ensureFeedbackQuery(query, split = "train") {
@@ -2201,7 +2363,7 @@ async function runConceptPreview(forcedQueryId = "") {
     state.preview = { ...result, queryId, conceptId: state.conceptId };
     $("#concept-vector-candidates").disabled = !queryId || !state.conceptId || state.savedConceptSnapshot !== JSON.stringify(collectConcept());
     renderConceptPreview(result, queryId);
-    $("#concept-preview-status").textContent = `비교 완료 · ${result.query || query || "저장된 질의"}`;
+    $("#concept-preview-status").textContent = `${state.locale === "en" ? "Search complete" : "비교 완료"} · ${result.query || query || (state.locale === "en" ? "Saved query" : "저장된 질의")}`;
     updateTuneReadiness();
     await loadConceptRuns();
   } catch (error) {
@@ -2219,7 +2381,8 @@ function renderResultSet(result, label, kind, queryId) {
   const hits = result?.hits || [];
   const selectedConcept = collectConcept();
   const sourceFields = [...new Set([selectedConcept.corpus.title_field, ...selectedConcept.corpus.text_fields].filter(Boolean))];
-  const resultCountLabel = kind === "pool" ? `${hits.length}개 · 검색별 후보` : `${Number(result?.total || 0).toLocaleString()}개 · 상위 ${hits.length}개`;
+  const english = state.locale === "en";
+  const resultCountLabel = kind === "pool" ? (english ? `${hits.length} · candidates per mode` : `${hits.length}개 · 검색별 후보`) : (english ? `${Number(result?.total || 0).toLocaleString()} matches · top ${hits.length}` : `${Number(result?.total || 0).toLocaleString()}개 · 상위 ${hits.length}개`);
   return `<section class="concept-result-column"><div class="concept-result-heading"><h3>${label}</h3><span>${resultCountLabel}</span></div>${hits.map((hit) => {
     const id = hit._id || "";
     const documentIndex = String(hit._index || selectedConcept.corpus.index || "");
@@ -2229,13 +2392,13 @@ function renderResultSet(result, label, kind, queryId) {
     const titleValue = sourceField(source, titleSourceField);
     const title = source.title || titleValue || source.summary || id;
     const evidence = hit.evidence || [];
-    const kindLabels = { concept: "개념", definition: "설명", alias: "다른 표현", related: "함께 볼 표현" };
-    const basisLabels = { lexical: "문자 일치" };
-    const statusLabels = { candidate: "검색 후보" };
+    const kindLabels = english ? { concept: "concept", definition: "definition", alias: "alias", related: "related expression" } : { concept: "개념", definition: "설명", alias: "다른 표현", related: "함께 볼 표현" };
+    const basisLabels = english ? { lexical: "text match" } : { lexical: "문자 일치" };
+    const statusLabels = english ? { candidate: "search candidate" } : { candidate: "검색 후보" };
     const matchedTerms = [...new Set(evidence.map((item) => item.term || item.concept_term).filter(Boolean))];
-    const evidenceSummary = matchedTerms.length ? `일치 표현: ${matchedTerms.slice(0, 4).map(escapeHtml).join(", ")}${matchedTerms.length > 4 ? ` 외 ${matchedTerms.length - 4}개` : ""}` : "표시할 개념 일치 근거가 없습니다.";
-    const evidenceItems = `${evidence.slice(0, 6).map((item) => `<span class="evidence-chip">${escapeHtml(item.field || "필드")}: ${escapeHtml(item.term || item.concept_term || "일치 표현")} · ${escapeHtml(kindLabels[item.kind] || item.kind || "표현")} · ${escapeHtml(basisLabels[item.basis] || item.basis || "문자 일치")} · ${escapeHtml(statusLabels[item.status] || item.status || "후보")}</span>`).join("")}${evidence.length > 6 ? `<span class="evidence-chip muted">외 ${evidence.length - 6}건</span>` : ""}`;
-    const evidenceHtml = evidence.length ? `<div class="evidence-summary">${evidenceSummary}</div><details class="concept-evidence-details"><summary>연결된 표현 보기 · ${evidence.length}건</summary><div class="concept-evidence-items">${evidenceItems}</div></details>` : (kind === "candidate" ? '<span class="muted">표시할 개념 일치 근거가 없습니다.</span>' : "");
+    const evidenceSummary = matchedTerms.length ? `${english ? "Matched terms" : "일치 표현"}: ${matchedTerms.slice(0, 4).map(escapeHtml).join(", ")}${matchedTerms.length > 4 ? (english ? ` and ${matchedTerms.length - 4} more` : ` 외 ${matchedTerms.length - 4}개`) : ""}` : (english ? "No concept-match evidence is available." : "표시할 개념 일치 근거가 없습니다.");
+    const evidenceItems = `${evidence.slice(0, 6).map((item) => `<span class="evidence-chip">${escapeHtml(item.field || (english ? "field" : "필드"))}: ${escapeHtml(item.term || item.concept_term || (english ? "matched term" : "일치 표현"))} · ${escapeHtml(kindLabels[item.kind] || item.kind || (english ? "expression" : "표현"))} · ${escapeHtml(basisLabels[item.basis] || item.basis || (english ? "text match" : "문자 일치"))} · ${escapeHtml(statusLabels[item.status] || item.status || (english ? "candidate" : "후보"))}</span>`).join("")}${evidence.length > 6 ? `<span class="evidence-chip muted">${english ? `${evidence.length - 6} more` : `외 ${evidence.length - 6}건`}</span>` : ""}`;
+    const evidenceHtml = evidence.length ? `<div class="evidence-summary">${evidenceSummary}</div><details class="concept-evidence-details"><summary>${english ? `View matched expressions · ${evidence.length}` : `연결된 표현 보기 · ${evidence.length}건`}</summary><div class="concept-evidence-items">${evidenceItems}</div></details>` : (kind === "candidate" ? `<span class="muted">${english ? "No concept-match evidence is available." : "표시할 개념 일치 근거가 없습니다."}</span>` : "");
     let previewText = hit.snippet || evidence.map((item) => item.snippet || "").filter(Boolean).join(" … ");
     const titleText = titleValue == null ? "" : String(Array.isArray(titleValue) ? titleValue.flat(Infinity).join(" ") : titleValue).trim();
     if (kind === "candidate" && (!previewText || (titleText && previewText.trim() === titleText))) {
@@ -2256,16 +2419,19 @@ function renderResultSet(result, label, kind, queryId) {
     const judgment = hit.judgment || {};
     const pinned = Boolean(hit.pinned ?? judgment.pinned);
     const organicRank = kind === "pool" ? (hit.laneRanks?.bm25 ?? null) : hit.organic_rank ?? (pinned ? null : hit.rank);
-    const rankLabel = kind === "pool"
+    const rankLabel = english ? (kind === "pool"
+      ? `BM25 ${hit.laneRanks?.bm25 ? `#${hit.laneRanks.bm25}` : "not found"} · Vector ${hit.laneRanks?.vector ? `#${hit.laneRanks.vector}` : "not found"}`
+      : kind === "vector" ? `Vector rank ${Number(hit.rank || 0)}` : pinned && organicRank == null ? "Pinned · outside search rank" : Number(organicRank || hit.rank || 0) ? `Search rank ${Number(organicRank || hit.rank)}` : "Search rank —") : kind === "pool"
       ? `BM25 ${hit.laneRanks?.bm25 ? `#${hit.laneRanks.bm25}` : "미포함"} · 벡터 ${hit.laneRanks?.vector ? `#${hit.laneRanks.vector}` : "미포함"}`
       : kind === "vector" ? `벡터 순위 ${Number(hit.rank || 0)}` : pinned && organicRank == null ? "고정 배치 · 검색 순위 밖" : Number(organicRank || hit.rank || 0) ? `검색 순위 ${Number(organicRank || hit.rank)}` : "검색 순위 —";
-    const rankBadge = pinned ? '<span class="pin-badge">따로 고정</span>' : "";
+    const rankBadge = pinned ? `<span class="pin-badge">${english ? "Pinned separately" : "따로 고정"}</span>` : "";
     const canJudge = ["candidate", "vector", "pool"].includes(kind) && queryId;
     const ratingOption = judgment.rating == null ? "null" : String(judgment.rating);
-    return `<article class="concept-hit"><div class="concept-hit-top"><span class="issue-key">${escapeHtml(id)}</span><span class="concept-rank">${escapeHtml(rankLabel)} ${rankBadge}</span></div>${hit._index ? `<small class="muted concept-hit-index">${escapeHtml(documentIndex)}</small>` : ""}<h4>${escapeHtml(title)}</h4><p class="concept-hit-snippet">${escapeHtml(previewText || "원문 발췌가 없습니다.")}</p>${originalFields ? `<details class="original-fields"><summary>선택한 원문 필드 보기</summary>${originalFields}</details>` : ""}<div class="concept-evidence">${evidenceHtml || (["candidate", "pool"].includes(kind) ? '<span class="muted">표시할 개념 일치 근거가 없습니다.</span>' : "")}</div>${canJudge ? `<div class="judge-controls" data-mode="${escapeHtml(kind)}" data-index="${escapeHtml(documentIndex)}" data-id="${escapeHtml(id)}" data-query-id="${escapeHtml(queryId)}" data-organic-rank="${escapeHtml(organicRank ?? "")}" data-vector-rank="${escapeHtml(hit.laneRanks?.vector ?? (kind === "vector" ? hit.rank : "") ?? "")}" data-bm25-rank="${escapeHtml(hit.laneRanks?.bm25 ?? "")}"><label>관련도 <select class="judge-rating" aria-label="${escapeHtml(id)} 관련도 평가"><option value="null" ${ratingOption === "null" ? "selected" : ""}>미평가</option><option value="0" ${ratingOption === "0" ? "selected" : ""}>0 · 무관</option><option value="1" ${ratingOption === "1" ? "selected" : ""}>1 · 조금 관련</option><option value="2" ${ratingOption === "2" ? "selected" : ""}>2 · 관련 있음</option><option value="3" ${ratingOption === "3" ? "selected" : ""}>3 · 매우 관련</option></select></label><label class="pin-label"><input type="checkbox" class="judge-pin" ${pinned ? "checked" : ""}> 따로 고정</label><button class="button button-small button-secondary save-judgment">평가 저장</button></div>` : ""}</article>`;
+    const judgmentUi = english ? `<label>Relevance <select class="judge-rating" aria-label="${escapeHtml(id)} relevance judgment"><option value="null" ${ratingOption === "null" ? "selected" : ""}>Not rated</option><option value="0" ${ratingOption === "0" ? "selected" : ""}>0 · Not relevant</option><option value="1" ${ratingOption === "1" ? "selected" : ""}>1 · Slightly relevant</option><option value="2" ${ratingOption === "2" ? "selected" : ""}>2 · Relevant</option><option value="3" ${ratingOption === "3" ? "selected" : ""}>3 · Highly relevant</option></select></label><label class="pin-label"><input type="checkbox" class="judge-pin" ${pinned ? "checked" : ""}> Pin separately</label><button class="button button-small button-secondary save-judgment">Save judgment</button>` : `<label>관련도 <select class="judge-rating" aria-label="${escapeHtml(id)} 관련도 평가"><option value="null" ${ratingOption === "null" ? "selected" : ""}>미평가</option><option value="0" ${ratingOption === "0" ? "selected" : ""}>0 · 무관</option><option value="1" ${ratingOption === "1" ? "selected" : ""}>1 · 조금 관련</option><option value="2" ${ratingOption === "2" ? "selected" : ""}>2 · 관련 있음</option><option value="3" ${ratingOption === "3" ? "selected" : ""}>3 · 매우 관련</option></select></label><label class="pin-label"><input type="checkbox" class="judge-pin" ${pinned ? "checked" : ""}> 따로 고정</label><button class="button button-small button-secondary save-judgment">평가 저장</button>`;
+    return `<article class="concept-hit"><div class="concept-hit-top"><span class="issue-key">${escapeHtml(id)}</span><span class="concept-rank">${escapeHtml(rankLabel)} ${rankBadge}</span></div>${hit._index ? `<small class="muted concept-hit-index">${escapeHtml(documentIndex)}</small>` : ""}<h4>${escapeHtml(title)}</h4><p class="concept-hit-snippet">${escapeHtml(previewText || (english ? "No source excerpt is available." : "원문 발췌가 없습니다."))}</p>${originalFields ? `<details class="original-fields"><summary>${english ? "Show selected source fields" : "선택한 원문 필드 보기"}</summary>${originalFields}</details>` : ""}<div class="concept-evidence">${evidenceHtml || (["candidate", "pool"].includes(kind) ? `<span class="muted">${english ? "No concept-match evidence is available." : "표시할 개념 일치 근거가 없습니다."}</span>` : "")}</div>${canJudge ? `<div class="judge-controls" data-mode="${escapeHtml(kind)}" data-index="${escapeHtml(documentIndex)}" data-id="${escapeHtml(id)}" data-query-id="${escapeHtml(queryId)}" data-organic-rank="${escapeHtml(organicRank ?? "")}" data-vector-rank="${escapeHtml(hit.laneRanks?.vector ?? (kind === "vector" ? hit.rank : "") ?? "")}" data-bm25-rank="${escapeHtml(hit.laneRanks?.bm25 ?? "")}">${judgmentUi}</div>` : ""}</article>`;
   }).join("") || (kind === "candidate"
-    ? '<div class="compact-empty concept-candidate-empty"><p>개념 적용 결과 목록에 표시할 후보가 없습니다. 제목이나 본문에서 기억나는 단어로 찾아볼 수 있습니다.</p><button type="button" class="button button-secondary button-small locate-document-cta">원하는 문서 찾아보기</button></div>'
-    : '<div class="compact-empty"><p>일치하는 문서가 없습니다.</p></div>')}</section>`;
+    ? `<div class="compact-empty concept-candidate-empty"><p>${english ? "No candidates are shown for this concept search. Try a word you remember from the title or text." : "개념 적용 결과 목록에 표시할 후보가 없습니다. 제목이나 본문에서 기억나는 단어로 찾아볼 수 있습니다."}</p><button type="button" class="button button-secondary button-small locate-document-cta">${english ? "Find a document" : "원하는 문서 찾아보기"}</button></div>`
+    : `<div class="compact-empty"><p>${english ? "No matching documents." : "일치하는 문서가 없습니다."}</p></div>`)}</section>`;
 }
 
 async function loadVectorCandidates() {
@@ -2479,10 +2645,11 @@ async function compareSavedQueryGroupModes() {
 }
 
 function renderConceptPreview(result, queryId, options = {}) {
+  const english = state.locale === "en";
   const comparison = result.comparison || [];
-  const comparisonHtml = comparison.length ? `<details class="rank-comparison"><summary>문서별 순위 변화 (${comparison.length})</summary><div class="rank-comparison-list">${comparison.map((row) => `<div><code>${escapeHtml([row.document_index, row.document_id || row._id].filter(Boolean).join(" / ") || "문서")}</code><span>기본 ${escapeHtml(row.baseline_rank ?? "—")} → 개념 적용 ${escapeHtml(row.candidate_rank ?? "—")}</span></div>`).join("")}</div></details>` : "";
+  const comparisonHtml = comparison.length ? `<details class="rank-comparison"><summary>${english ? `Per-document rank changes (${comparison.length})` : `문서별 순위 변화 (${comparison.length})`}</summary><div class="rank-comparison-list">${comparison.map((row) => `<div><code>${escapeHtml([row.document_index, row.document_id || row._id].filter(Boolean).join(" / ") || (english ? "Document" : "문서"))}</code><span>${english ? "Baseline" : "기본"} ${escapeHtml(row.baseline_rank ?? "—")} → ${english ? "Concept" : "개념 적용"} ${escapeHtml(row.candidate_rank ?? "—")}</span></div>`).join("")}</div></details>` : "";
   const warnings = [...localizedConceptWarnings(result), ...(options.extraNotice ? [options.extraNotice] : [])].map((warning) => `<p class="notice notice-muted">${escapeHtml(warning)}</p>`).join("");
-  const markup = `${warnings}<div class="concept-results-grid">${renderResultSet(result.baseline, "기본 검색", "baseline", queryId)}${renderResultSet(result.candidate, options.candidateLabel || "개념 적용 · BM25", "candidate", queryId)}</div>${comparisonHtml}`;
+  const markup = `${warnings}<div class="concept-results-grid">${renderResultSet(result.baseline, english ? "Baseline search" : "기본 검색", "baseline", queryId)}${renderResultSet(result.candidate, options.candidateLabel || (english ? "Concept search · BM25" : "개념 적용 · BM25"), "candidate", queryId)}</div>${comparisonHtml}`;
   const target = options.target || $("#concept-preview-results");
   target.innerHTML = markup;
   updateModeComparisonAction();
@@ -2692,7 +2859,7 @@ async function saveJudgment(button) {
     else if (payload.pinned && controls.dataset.organicRank) rank.innerHTML = `검색 순위 ${escapeHtml(controls.dataset.organicRank)} <span class="pin-badge">따로 고정</span>`;
     else if (payload.pinned) rank.innerHTML = `고정 배치 · 검색 순위 밖 <span class="pin-badge">따로 고정</span>`;
     else rank.textContent = controls.dataset.organicRank ? `검색 순위 ${controls.dataset.organicRank}` : "고정 해제 · 다시 비교하면 순위를 확인할 수 있습니다.";
-    showToast(payload.pinned ? "고정 위치를 저장했습니다. 관련도 평가는 품질 점수에 반영되고 고정 위치는 검색 순위로 계산하지 않습니다." : "문서 평가를 저장했습니다.");
+    showToast(state.locale === "en" ? (payload.pinned ? "Saved pin and relevance judgment." : "Relevance judgment saved. Compare search modes using the same query when ready.") : (payload.pinned ? "고정 위치를 저장했습니다. 관련도 평가는 품질 점수에 반영되고 고정 위치는 검색 순위로 계산하지 않습니다." : "문서 평가를 저장했습니다."));
     updateTuneReadiness();
   }
   catch (error) { showToast(error.message, true); }
@@ -3978,10 +4145,15 @@ function fillConceptExample() {
 
 function init() {
   try {
-    $("#es-url").value = localStorage.getItem("es-rag-url") || $("#es-url").value;
+    const savedUrl = localStorage.getItem("es-rag-url") || "";
+    $("#es-url").value = safeEndpoint(savedUrl) || $("#es-url").value;
+    if (savedUrl && !safeEndpoint(savedUrl)) localStorage.removeItem("es-rag-url");
     $("#index-name").value = localStorage.getItem("es-rag-index") || $("#index-name").value;
     $("#auth-type").value = localStorage.getItem("es-rag-auth-type") || "none";
   } catch { /* Private browsing can disable localStorage. */ }
+  try { state.locale = localStorage.getItem("es-rag-locale") === "en" ? "en" : "ko"; } catch {}
+  applyLocale(state.locale);
+  renderConnectionProfiles();
   renderBoostInputs();
   addRelatedTerm();
   $("#concept-index-badge").textContent = $("#index-name").value.trim();
@@ -3994,6 +4166,14 @@ function init() {
   $$(".tab").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
   activateTab("concept-panel");
   bindKnowledgeControls();
+  $("#ui-language").addEventListener("change", () => {
+    applyLocale($("#ui-language").value);
+    try { localStorage.setItem("es-rag-locale", state.locale); } catch {}
+  });
+  $("#save-connection-profile").addEventListener("click", saveConnectionProfile);
+  $("#load-connection-profile").addEventListener("click", loadConnectionProfile);
+  $("#delete-connection-profile").addEventListener("click", deleteConnectionProfile);
+  $("#connection-profile-select").addEventListener("change", () => { $("#delete-connection-profile").disabled = !$("#connection-profile-select").value; });
   $("#auth-type").addEventListener("change", () => {
     $("#basic-fields").classList.toggle("hidden", $("#auth-type").value !== "basic");
     $("#api-key-fields").classList.toggle("hidden", $("#auth-type").value !== "api_key");

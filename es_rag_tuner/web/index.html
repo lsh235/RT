@@ -14,7 +14,7 @@
       <span class="brand-mark">ES</span>
       <span><strong>Retrieval Workbench</strong><small>Elasticsearch · RAG quality lab</small></span>
     </a>
-    <div class="top-meta"><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.7.0</span></div>
+  <div class="top-meta"><label class="language-control" for="ui-language">Language</label><select id="ui-language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.8.0</span></div>
   </header>
 
   <main id="auth-screen" class="auth-screen" aria-labelledby="auth-title">
@@ -33,14 +33,22 @@
   <div class="layout hidden" id="workbench-layout">
     <aside class="sidebar">
       <section class="side-section">
-        <div class="section-heading"><span class="step">01</span><div><h2>Elasticsearch 연결</h2><p>연결 정보는 저장하지 않습니다.</p></div></div>
-        <label class="field-label" for="es-url">Endpoint</label>
+        <div class="section-heading"><span class="step">01</span><div><h2 data-i18n="connectTitle">Elasticsearch 연결</h2><p data-i18n="connectIntro">연결 정보는 저장하지 않습니다.</p></div></div>
+        <section class="connection-profiles" aria-labelledby="profiles-title">
+          <label id="profiles-title" class="field-label" for="connection-profile-select" data-i18n="profilesTitle">저장한 연결 프로필</label>
+          <div class="profile-row"><select id="connection-profile-select" class="text-input" aria-label="저장한 연결 프로필"><option value="" data-i18n="noProfiles">프로필 없음</option></select><button id="load-connection-profile" type="button" class="button button-secondary button-small" data-i18n="profileLoad">불러오기</button></div>
+          <div class="profile-row"><input id="connection-profile-name" class="text-input" maxlength="60" placeholder="프로필 이름" aria-label="프로필 이름"><button id="save-connection-profile" type="button" class="button button-secondary button-small" data-i18n="profileSave">현재 설정 저장</button></div>
+          <button id="delete-connection-profile" type="button" class="button button-secondary button-small" disabled data-i18n="profileDelete">선택 프로필 삭제</button>
+          <p id="profile-storage-note" class="helper-text" data-i18n="profileNote">이 브라우저에 endpoint, 인덱스, 인증 방식만 저장합니다. 사용자 이름, 비밀번호, API 키는 저장하지 않습니다.</p>
+          <p id="profile-status" class="helper-text" role="status" aria-live="polite"></p>
+        </section>
+        <label class="field-label" for="es-url" data-i18n="endpointLabel">Endpoint</label>
         <input id="es-url" class="text-input" type="url" value="http://127.0.0.1:9200" autocomplete="url">
-        <label class="field-label" for="auth-type">인증 방식</label>
+        <label class="field-label" for="auth-type" data-i18n="authLabel">인증 방식</label>
         <select id="auth-type" class="text-input">
-          <option value="none">인증 없음</option>
-          <option value="basic">Basic Auth</option>
-          <option value="api_key">API Key</option>
+          <option value="none" data-i18n="authNone">인증 없음</option>
+          <option value="basic" data-i18n="authBasic">Basic Auth</option>
+          <option value="api_key" data-i18n="authApiKey">API Key</option>
         </select>
         <div id="basic-fields" class="auth-fields hidden">
           <label class="field-label" for="es-user">사용자 이름</label>
@@ -52,10 +60,11 @@
           <label class="field-label" for="es-api-key">인코딩된 API Key</label>
           <input id="es-api-key" class="text-input" type="password" autocomplete="off" placeholder="ID:API key Base64 값">
         </div>
-        <label class="field-label" for="index-name">검색 인덱스</label>
+        <label class="field-label" for="index-name" data-i18n="indexLabel">검색 인덱스</label>
         <div class="input-combo"><input id="index-name" class="text-input" value="jira-grpc-issues" spellcheck="false" list="index-options"><datalist id="index-options"></datalist><button id="refresh-indices" class="icon-button" title="인덱스 목록 새로고침" aria-label="인덱스 목록 새로고침">↻</button></div>
         <button id="connect-button" class="button button-primary full-width"><span class="button-icon">↗</span> 연결 확인</button>
-        <div id="connection-status" class="connection-status idle"><span class="status-dot"></span><span>연결 전</span></div>
+        <div id="connection-status" class="connection-status idle" role="status" aria-live="polite"><span class="status-dot"></span><span data-i18n="notConnected">연결 전</span></div>
+        <div id="connection-guidance" class="notice notice-muted" role="status" aria-live="polite" data-i18n="connectHint">먼저 연결하세요. 연결이 끝나면 인덱스 필드를 확인하고 첫 검색을 시작할 수 있습니다.</div>
         <div id="cluster-summary" class="cluster-summary hidden"></div>
       </section>
 
@@ -92,7 +101,7 @@
         <div class="target-badge"><span class="target-label">기존 샘플 평가 목표</span><details><summary>목표 보기</summary><strong>Recall@5 ≥ 0.90</strong><strong>MRR@5 ≥ 0.80</strong><small>샘플 데이터용 기준입니다.</small></details></div>
       </div>
 
-      <nav class="tabs" role="tablist" aria-label="워크벤치 메뉴">
+      <nav class="tabs" role="tablist" aria-label="Advanced workbench tools · 고급 워크벤치 도구">
         <button class="tab active" role="tab" aria-selected="true" data-tab="concept-panel"><span>◎</span> 개념 실험</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="search-panel"><span>⌕</span> 검색 실험</button>
         <button class="tab" role="tab" aria-selected="false" data-tab="evaluation-panel"><span>▦</span> 평가 및 튜닝</button>
@@ -111,11 +120,14 @@
             <button id="sample-onboarding-open" type="button" class="button button-secondary">샘플 적재 설정 열기</button>
           </div>
           <div id="quickstart-preview" class="quickstart-preview" aria-live="polite"><p class="muted">먼저 왼쪽에서 Elasticsearch 연결을 확인하세요. 인덱스가 선택되어 있으면 바로 필드를 살펴볼 수 있습니다.</p></div>
+          <p class="first-use-note" data-i18n="firstUsePath">처음이라면 순서대로 진행하세요: 연결 → 필드 확인 및 적용 → 첫 검색 → 문서 관련도 저장 → 검색 모드 비교.</p>
         </section>
         <div class="concept-toolbar card"><div><strong>저장한 개념</strong><p>이 브라우저 세션에서 Elasticsearch 연결을 확인한 뒤 사용할 수 있습니다.</p></div><div class="concept-toolbar-actions"><select id="saved-concepts" aria-label="저장한 개념"><option value="">개념 선택</option></select><button id="load-concept" class="button button-secondary button-small">불러오기</button><button id="new-concept" class="button button-secondary button-small">새 개념</button></div></div>
         <div id="concept-editor" class="concept-editor card">
           <div class="concept-section-heading"><div><span class="step">2</span><div><h3>찾고 싶은 내용</h3><p>상황을 평소 쓰는 말로 설명하세요. 먼저 결과를 보고 이름과 설명은 나중에 다듬어도 됩니다.</p></div></div><div class="concept-save-actions"><button id="fill-concept-example" class="button button-secondary button-small">예시 보기</button><button id="save-concept" class="button button-secondary">개념 저장</button></div></div>
-          <div class="guided-query"><label class="field-label" for="guided-query-text">어떤 내용을 찾고 싶나요?</label><textarea id="guided-query-text" rows="2" placeholder="예: 요청이 시간 초과된 뒤 다시 시도해 복구한 사례"></textarea><button id="guided-first-preview" class="button button-primary" disabled>이 내용으로 결과 보기</button><p class="helper-text">첫 질문은 설정 조정에 사용합니다. 다른 질문은 조정에 쓰지 않고 결과가 유지되는지 따로 확인할 수 있습니다.</p><p class="helper-text">개념 검색은 선택한 필드에서 표현을 찾습니다. 벡터·혼합 검색은 ‘검색 실험’ 탭에서 계속 사용할 수 있습니다.</p></div>
+          <div class="guided-query"><label class="field-label" for="guided-query-text" data-i18n="queryLabel">어떤 내용을 찾고 싶나요?</label><textarea id="guided-query-text" rows="2" placeholder="예: 요청이 시간 초과된 뒤 다시 시도해 복구한 사례"></textarea><button id="guided-first-preview" class="button button-primary" disabled data-i18n="firstSearchButton">이 내용으로 결과 보기</button><p class="helper-text" data-i18n="queryHelp">첫 질문은 설정 조정에 사용합니다. 다른 질문은 조정에 쓰지 않고 결과가 유지되는지 따로 확인할 수 있습니다.</p><p class="helper-text" data-i18n="modeHelp">개념 검색은 선택한 필드에서 표현을 찾습니다. 벡터·혼합 검색은 ‘검색 실험’ 탭에서 계속 사용할 수 있습니다.</p></div>
+          <p class="first-use-note" data-i18n="judgment">문서별 관련도를 직접 판단해 저장하세요. 이 기록은 자동 채점이 아닙니다.</p>
+          <p class="first-use-note" data-i18n="comparison">평가 기록이 생기면 같은 질의로 BM25, 벡터, 혼합 모드를 비교할 수 있습니다.</p>
           <details class="advanced-section"><summary>개념 이름과 뜻 다듬기 <span>선택 사항</span></summary><div class="concept-form-grid"><label class="field-label">개념 이름<input id="concept-name" class="text-input" maxlength="120" placeholder="예: 연결 시간 초과 후 복구"></label><label class="field-label">설명<input id="concept-description" class="text-input" maxlength="500" placeholder="이 개념이 찾으려는 상황"></label></div>
           <div class="concept-form-grid advanced-inline"><label class="field-label">다른 표현<input id="concept-aliases" class="text-input" placeholder="쉼표로 구분 · 예: timeout retry, 요청 재시도"></label><label class="field-label">제외할 표현<input id="concept-exclusions" class="text-input" placeholder="쉼표로 구분 · 예: 연결 설정 가이드"></label></div></details>
           <details class="advanced-section"><summary>함께 볼 표현과 필드별 설정 <span>선택 사항</span></summary>
@@ -156,10 +168,10 @@
       </section>
 
       <section id="search-panel" class="tab-panel" role="tabpanel" hidden>
-        <div class="panel-intro"><div><h2>검색 실험</h2><p>BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.</p></div><div class="panel-badges"><span id="codebase-index-status" class="label-chip">코드 색인 확인 중</span><span id="search-index-badge" class="index-badge">jira-grpc-issues</span></div></div>
+        <div class="panel-intro"><div><h2 data-i18n="searchTitle">검색 실험</h2><p data-i18n="searchIntro">BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.</p></div><div class="panel-badges"><span id="codebase-index-status" class="label-chip">코드 색인 확인 중</span><span id="search-index-badge" class="index-badge">jira-grpc-issues</span></div></div>
         <div class="search-box card">
-          <label class="field-label" for="search-query">검색 질의</label>
-          <div class="search-row"><textarea id="search-query" rows="2" placeholder="예: 느린 네트워크에서 keepalive watchdog timeout이 발생하는 원인은?"></textarea><button id="search-button" class="button button-primary search-submit" disabled><span>검색</span><kbd>↵</kbd></button></div>
+          <label class="field-label" for="search-query" data-i18n="searchQuery">검색 질의</label>
+          <div class="search-row"><textarea id="search-query" rows="2" placeholder="예: 느린 네트워크에서 keepalive watchdog timeout이 발생하는 원인은?"></textarea><button id="search-button" class="button button-primary search-submit" disabled><span data-i18n="searchButton">검색</span><kbd>↵</kbd></button></div>
           <div class="search-options"><label>검색 방식 <select id="search-mode"><option value="bm25">BM25</option><option value="vector">벡터</option><option value="hybrid">하이브리드 (RRF)</option><option value="code_rag">코드 + Jira RAG</option></select></label><label>결과 수 <select id="search-size"><option>5</option><option selected>10</option><option>20</option><option>50</option></select></label><label id="rank-constant-wrap" class="hidden">RRF 상수 <input id="rank-constant" class="compact-number" type="number" min="1" max="200" value="60"></label><button id="filter-toggle" class="text-button">+ 메타데이터 필터</button></div>
           <div id="search-mode-readiness" class="notice notice-muted hidden" role="status" aria-live="polite" aria-atomic="true"></div>
           <button type="button" class="button button-secondary button-small hidden" data-open-embedding-setup>임베딩 상태 자세히 보기</button>
@@ -174,7 +186,7 @@
         </details>
 
         <div id="search-summary" class="result-summary hidden"></div>
-        <div id="search-results" class="search-results"><div class="empty-state"><div class="empty-icon">⌕</div><h3>검색 실험을 시작하세요</h3><p>Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.</p></div></div>
+        <div id="search-results" class="search-results"><div class="empty-state"><div class="empty-icon">⌕</div><h3 data-i18n="searchEmptyTitle">검색 실험을 시작하세요</h3><p data-i18n="searchEmptyCopy">Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.</p></div></div>
       </section>
 
       <section id="evaluation-panel" class="tab-panel" role="tabpanel" hidden>

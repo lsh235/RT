@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.7.0",
-  "current_stage": "R02",
+  "current_version": "1.8.0",
+  "current_stage": "R03",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 8
+    "started_rounds": 11
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -82,21 +82,25 @@
         "docs/acceptance/v1.7.0.md",
         "docs/acceptance/v1.7.0-independent-qa.md"
       ],
-      "commit": null,
-      "blockers": []
+      "commit": "4c6b60ba6fe51ef30df8d14421e7d281d479ef14",
+      "blockers": [],
+      "tag": "v1.7.0"
     },
     {
       "stage": "R03",
       "version": "1.8.0",
-      "status": "pending",
+      "status": "complete",
       "owner_roles": [
         "E",
         "A",
         "F"
       ],
       "required_gates": "docs/acceptance/v1.8.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
+      "fix_rounds_used": 2,
+      "evidence": [
+        "docs/acceptance/v1.8.0.md",
+        "docs/acceptance/v1.8.0-independent-qa.md"
+      ],
       "commit": null,
       "blockers": []
     },
@@ -243,63 +247,63 @@
   ],
   "current_gates": [
     {
+      "id": "first-use-journey",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
+      "id": "sample-real-index-clarity",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
+      "id": "non-secret-connection-profiles",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
+      "id": "recovery-guidance",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
+      "id": "ko-en-ui",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
+      "id": "keyboard-responsive",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+    },
+    {
       "id": "existing-behavior",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
     },
     {
-      "id": "route-service-boundaries",
+      "id": "live-app-elasticsearch",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
     },
     {
-      "id": "shared-error-contract",
+      "id": "docs-and-preservation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "legacy-db-migration",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "migration-repeat-failure",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "backup-restore",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "browser-module-split",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "api-architecture-docs",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
-    },
-    {
-      "id": "worktree-preservation",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
     }
   ],
   "completed_commit": null,
   "remaining_blockers": [
-    "Bundled third-party sample data redistribution rights remain unresolved before public release.",
+    "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. Recheck with the content owners or remove/replace the data before public release.",
     "GitHub-hosted CI has not run; verify after the final authorized branch push.",
     "Initial hashes for three pre-existing untracked user files were not captured, so byte-for-byte baseline comparison is unavailable.",
     "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there."
