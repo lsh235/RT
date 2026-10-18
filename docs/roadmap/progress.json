@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.15.0",
-  "current_stage": "R10",
+  "current_version": "1.16.0-rc.1",
+  "current_stage": "R11",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 32
+    "started_rounds": 33
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -270,7 +270,7 @@
       "commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
       "blockers": [],
       "implementation_commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
-      "acceptance_commit": null,
+      "acceptance_commit": "3ad25c13bb0cf6334a1bf36a6b54c841ce2c8c58",
       "round_log": [
         {
           "round": 1,
@@ -287,12 +287,12 @@
           "resolution": "Updated the legacy expectation to the fixed origin-only doctor output while retaining a check that requests use the configured full URL; focused and independent full-suite retests passed."
         }
       ],
-      "tag": null
+      "tag": "v1.15.0"
     },
     {
       "stage": "R11",
       "version": "1.16.0-rc.1",
-      "status": "pending",
+      "status": "in_progress",
       "owner_roles": [
         "F",
         "A",
@@ -303,9 +303,25 @@
       ],
       "required_gates": "docs/acceptance/v1.16.0-rc.1.md",
       "fix_rounds_used": 0,
-      "evidence": [],
+      "evidence": [
+        "docs/acceptance/v1.16.0-rc.1.md"
+      ],
       "commit": null,
-      "blockers": []
+      "blockers": [
+        "Separate redistribution permission for the bundled gRPC Jira data files has not yet been received or verified; required R11 gate remains NOT RUN."
+      ],
+      "implementation_commit": null,
+      "acceptance_commit": null,
+      "tag": null,
+      "round_log": [
+        {
+          "round": 1,
+          "kind": "initial_implementation",
+          "status": "in_progress",
+          "finding": null,
+          "resolution": null
+        }
+      ]
     },
     {
       "stage": "R12",
@@ -324,55 +340,49 @@
   ],
   "current_gates": [
     {
-      "id": "external-profile-runtime-example",
+      "id": "code-dependency-model-sample-rights-inventory",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "context-bundle-identity-dedup-token-budget",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "experiment-evidence-fingerprint-preservation",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "secret-free-doctor-diagnostics",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "bounded-runtime-measurements",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "sqlite-backup-restore-preservation",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "regression-install-docs-preservation",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
-    },
-    {
-      "id": "sourced-quality-evaluation-readiness",
-      "required": false,
       "status": "NOT RUN",
-      "evidence": "No permission-cleared representative dataset has been received; see docs/acceptance/v1.15.0-independent-qa.md."
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "evidence-based-support-matrix",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "loopback-docker-compose-install",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "source-upgrade-migration-restore-docs",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "bilingual-user-contributor-security-docs",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "reproducible-package-dependency-locks",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+    },
+    {
+      "id": "full-independent-regression-preservation",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
     }
   ],
-  "completed_commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
+  "completed_commit": "3ad25c13bb0cf6334a1bf36a6b54c841ce2c8c58",
   "remaining_blockers": [
     "Third-party redistribution rights for the bundled sample remain unresolved; the user said separate permission evidence can be provided, but no evidence has been received or verified. Do not bundle new third-party sample content; reassess this asset for final public release.",
     "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the R12 sourced-quality gate remains NOT RUN and final outcome remains NO-GO unless this evidence is supplied and evaluated.",
