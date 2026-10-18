@@ -2163,7 +2163,7 @@ def export_run(concept_id: str, run_id: str) -> dict[str, Any]:
         warnings.append("nDCG uses judged documents only; unjudged documents are not treated as irrelevant, and pins do not alter organic rankings.")
     if row["kind"] == "tune" and not exported.get("validation"):
         warnings.append("Validation evidence is unavailable in this run; the recorded result is training-only.")
-    return {
+    artifact = {
         "format": "es-rag-experiment-run",
         "version": 1,
         "exported_at": _now(),
@@ -2181,3 +2181,11 @@ def export_run(concept_id: str, run_id: str) -> dict[str, Any]:
         },
         "limitations": warnings,
     }
+    # Hash the privacy-filtered content envelope, not the export timestamp or
+    # digest field. This lets repeated exports identify identical saved evidence.
+    fingerprint_basis = {
+        key: value for key, value in artifact.items()
+        if key not in {"exported_at", "content_fingerprint"}
+    }
+    artifact["content_fingerprint"] = _json_hash(fingerprint_basis)
+    return artifact

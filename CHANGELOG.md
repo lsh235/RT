@@ -2,6 +2,14 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.15.0] - 2026-10-19
+
+- Add explicit profile-based runtime examples and a bounded, deduplicated context bundle with a named caller-supplied token counter.
+- Add stable content fingerprints to saved experiment exports and secret-safe read-only Elasticsearch doctor output.
+- Add aggregate-only profile runtime measurements with concurrency limited to 1, 2, or 4 and at most 100 searches.
+- Revalidate the existing explicit SQLite backup/restore boundary; it remains per-file and excludes Elasticsearch indices.
+- The seven required R10 acceptance gates passed independent QA. The inherited sourced-quality gate remains NOT RUN; no representative corpus quality claim is made.
+
 ## [1.14.0] - 2026-10-19
 
 - Add deterministic concept-tuning candidates with a 30-candidate and 600-second ceiling, train-only candidate metrics, and validation-only selection that keeps the baseline on ties or incomplete validation.

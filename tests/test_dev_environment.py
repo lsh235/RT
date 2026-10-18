@@ -60,7 +60,7 @@ class DoctorTests(unittest.TestCase):
                 if product == "OpenSearch":
                     self.assertIn("plugin-dependent", result["feature_support_note"])
 
-    def test_inspection_uses_only_root_get_and_redacts_url_credentials(self):
+    def test_inspection_uses_only_root_get_and_reports_origin_without_url_secrets(self):
         payload = {"name": "node-a", "cluster_name": "test", "tagline": "You Know, for Search", "version": {"number": "9.5.5", "build_flavor": "default"}}
 
         class Response:
@@ -69,12 +69,15 @@ class DoctorTests(unittest.TestCase):
             def read(self): return json.dumps(payload).encode()
 
         with patch("es_rag_tuner.doctor.urllib.request.urlopen", return_value=Response()) as opener:
-            result = inspect_cluster("http://private-user:private-pass@example.test:9200/custom?secret=discard")
+            result = inspect_cluster("http://private-user:private-pass@example.test:9200/custom/base?secret=query-secret#fragment-secret")
         request = opener.call_args.args[0]
         self.assertEqual(request.get_method(), "GET")
-        self.assertEqual(request.full_url, "http://example.test:9200/custom/")
-        self.assertEqual(result["url"], "http://example.test:9200/custom")
-        self.assertNotIn("private", json.dumps(result))
+        self.assertEqual(request.full_url, "http://example.test:9200/custom/base/")
+        self.assertEqual(result["url"], "http://example.test:9200")
+        for marker in ("private-user", "private-pass", "query-secret", "fragment-secret"):
+            self.assertNotIn(marker, json.dumps(result))
+            self.assertNotIn(marker, request.full_url)
+        self.assertNotIn("/custom/base", json.dumps(result))
         self.assertIn("estimate", result["feature_support_note"])
 
     def test_cli_reports_connection_failure_with_nonzero_exit(self):

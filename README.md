@@ -6,7 +6,7 @@ Elasticsearch에 저장된 문서를 직접 검색하고, 검색 결과와 근�
 
 ## 개발 완료 목표
 
-현재 구현 작업 기준은 **R09 / v1.14.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
+R10 / v1.15.0의 일곱 구현 게이트는 독립 QA에서 통과했고, 버전 승인 기록을 정리하고 있습니다. [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행하고 있습니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
 
 ## 빠른 시작
 
@@ -96,7 +96,29 @@ BM25, 벡터, RRF 하이브리드 검색은 후보 풀과 최종 Top-K를 따로
 
 R08 평가 탭은 계정별 질의와 qrel을 CSV/JSONL로 가져오고 내보내며, 새 편집은 변경 불가능한 데이터셋 버전으로 저장합니다. 각 판단은 구체적인 인덱스와 문서 ID, 출처·사용 권한 상태, 수집일, 추출 규칙, 생략된 관련 항목, 판정자 정보를 보존합니다. `train`/`validation`/`test` 분할은 같은 정보 요구, 중복·유사 질의, 문서 및 문서 가족의 교차를 검사합니다.
 
-기본 `judged_only` 지표는 수치로 기록된 판단만 평가하고, 명시적 `null` 판단과 qrel 행 자체가 없는 문서는 따로 표시합니다. 둘 다 자동으로 무관 등급 `0`이 되지 않습니다. 결과에는 Precision, Recall, MRR, nDCG, judged coverage, 분모, 누락된 관련 문서와 비교 실행의 질의별 변화가 포함됩니다. Test 분할은 설정을 고정한 뒤 데이터셋 버전과 Elasticsearch 코퍼스마다 한 번 실행할 수 있습니다. 코드를 평가할 수 있다는 사실은 검색 품질 향상 증거가 아닙니다. 이 저장소에는 권리 확인을 마친 대표 qrels를 포함하지 않으며, 포함된 제3자 샘플에 대해서도 별도 사용 허가 자료를 아직 받지 않았습니다. 범위와 수치는 [v1.13.0 R08 acceptance](docs/acceptance/v1.13.0.md)에 기록합니다.
+기본 `judged_only` 지표는 수치로 기록된 판단만 평가하고, 명시적 `null` 판단과 qrel 행 자체가 없는 문서는 따로 표시합니다. 둘 다 자동으로 무관 등급 `0`이 되지 않습니다. 결과에는 Precision, Recall, MRR, nDCG, judged coverage, 분모, 누락된 관련 문서와 비교 실행의 질의별 변화가 포함됩니다. Test 분할은 설정을 고정한 뒤 데이터셋 버전과 Elasticsearch 코퍼스마다 한 번 실행할 수 있습니다. 코드를 평가할 수 있다는 사실은 검색 품질 향상 증거가 아닙니다. 이 저장소에는 권리 확인을 마친 대표 qrels를 포함하지 않으며, 포함된 제3자 샘플의 권리 증빙도 제공 가능하다고 하셨지만 아직 전달·검증되지 않았습니다. 범위와 수치는 [v1.13.0 R08 acceptance](docs/acceptance/v1.13.0.md)에 기록합니다.
+
+### 외부 Python 실행과 검색 문맥 내보내기
+
+`/api/concepts/export`로 내보낸 버전 프로필은 기존 `search_profile(connection, profile, query)` 런타임에서 사용할 수 있습니다. `examples/profile_context_handoff.py`는 검색 결과의 발췌만 담은 명시적 JSON 문맥 묶음을 만들고, 같은 `(인덱스, 문서 ID)`만 중복 제거합니다. API 키나 사용자 암호는 `ES_API_KEY` 또는 `ES_USERNAME`/`ES_PASSWORD` 환경변수에서 읽으며 파일에 넣지 않습니다.
+
+```bash
+.venv/bin/python -m pip install .
+ES_URL=http://127.0.0.1:9200 ES_API_KEY="$ES_API_KEY" \
+  .venv/bin/python examples/profile_context_handoff.py profile-export.json "검색 질의"
+```
+
+예제는 `whitespace-word-count-v1`이라는 공백 단어 계수기를 명시적으로 사용합니다. 이는 모델 토크나이저의 토큰 수가 아닙니다. 다른 애플리케이션에서 실제 모델 토큰 예산을 적용하려면 해당 모델의 토크나이저를 `build_context_bundle`의 `token_counter`로 전달하고, 묶음에 기록된 계수기 이름을 함께 확인하세요. 예제는 선택 발췌를 화면에 출력할 뿐, 외부 생성 서비스로 보내지 않습니다. 질의, 발췌, 문서 ID와 인덱스 이름을 공유하기 전에 검토하세요.
+
+읽기 전용 `doctor` 명령은 Elasticsearch 배포판과 버전 기반 기능 추정치를 출력하지만 URL 자격정보, 경로, query, fragment 및 전송 예외 원문은 보여주지 않습니다. 성능 예제는 동시성 1·2·4와 최대 100회 검색을 허용하고 p50/p95 및 처리량만 출력합니다. 측정값은 해당 로컬 환경과 코퍼스에만 적용됩니다.
+
+```bash
+ES_URL=http://127.0.0.1:9200 .venv/bin/python -m es_rag_tuner doctor
+ES_URL=http://127.0.0.1:9200 ES_BENCHMARK_QUERY="검색 질의" \
+  .venv/bin/python examples/benchmark_profile_runtime.py profile-export.json --iterations 20 --concurrency 2
+```
+
+API 계약과 데이터 경계는 [외부 런타임 안내](docs/external-runtime.md)와 [API 계약](docs/api-contract.md)을 참고하세요.
 
 ```bash
 .venv/bin/python -m pip install -e '.[semantic]'
@@ -146,10 +168,11 @@ Elasticsearch 주소, 인덱스와 인증 정보를 브라우저에서 입력합
 
 샘플 Jira 실험의 결과와 실행 조건은 [첫 마일스톤](docs/first-milestone.md)에 있습니다. 이것은 재현 가능한 샘플 평가이지 외부 코퍼스의 결과가 아닙니다. 실제 인덱스에 적용하기 전에 대표 질의와 기대 문서를 준비하고, 같은 조건에서 설정 전후를 비교하세요.
 
-통합 검증은 다음 명령으로 실행할 수 있습니다.
+개발 의존성 설치 후 기본 오프라인 회귀(기존 unittest와 pytest 함수 테스트 포함)는 다음 명령으로 실행합니다.
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python scripts/run_offline_tests.py
 ```
 
 전체 검사에는 로컬 Elasticsearch와 provider 계정이 필요한 테스트, 결정적 모의 검사가 함께 있습니다. 해당 의존성이 없는 환경의 실패나 건너뜀은 서비스 결함 판정도 전체 PASS 증거도 아닙니다. 실행 환경과 판정 범위는 [통합 acceptance 기록](docs/agent-acceptance.md)을 확인하세요.
@@ -168,7 +191,7 @@ Elasticsearch 주소, 인덱스와 인증 정보를 브라우저에서 입력합
 | 임베딩 프로필과 벡터 호환성 | [API와 저장 계약](docs/api-contract.md), [v1.11.0 R06 acceptance](docs/acceptance/v1.11.0.md) |
 | BM25/vector/RRF 비교, 결과 경로와 선택형 로컬 재순위화 | [API 계약](docs/api-contract.md), [v1.12.0 R07 acceptance](docs/acceptance/v1.12.0.md) |
 | 버전 관리 qrels, 판단 출처, 지표 및 분할 검증 | [API 계약](docs/api-contract.md), [v1.13.0 R08 acceptance](docs/acceptance/v1.13.0.md) |
-| 실험 비교와 내보내기 | [비교 연구](docs/experiment-comparison-research.md), [내보내기 연구](docs/experiment-export-research.md), [내보내기 acceptance](docs/experiment-export-acceptance.md) |
+| 실험 비교와 내보내기 | [비교 연구](docs/experiment-comparison-research.md), [내보내기 연구](docs/experiment-export-research.md), [외부 런타임과 문맥 전달](docs/external-runtime.md), [내보내기 acceptance](docs/experiment-export-acceptance.md) |
 
 ## 문제 해결
 

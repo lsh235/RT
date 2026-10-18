@@ -55,9 +55,10 @@ def inspect_cluster(url: str, timeout: float = 5.0) -> dict[str, object]:
     if parts.scheme not in {"http", "https"} or not parts.hostname:
         raise ValueError("Elasticsearch URL must be an absolute http:// or https:// URL")
     host = f"[{parts.hostname}]" if ":" in (parts.hostname or "") else parts.hostname or ""
-    authority = host + (f":{parts.port}" if parts.port else "")
-    safe_url = urlunsplit((parts.scheme, authority, parts.path.rstrip("/"), "", ""))
-    request = urllib.request.Request(safe_url + "/", headers={"Accept": "application/json"})
+    port = parts.port
+    authority = host + (f":{port}" if port else "")
+    request_url = urlunsplit((parts.scheme, authority, parts.path.rstrip("/"), "", "")) + "/"
+    request = urllib.request.Request(request_url, headers={"Accept": "application/json"})
     authorization = _authorization_header()
     if authorization:
         request.add_header("Authorization", authorization)
@@ -81,7 +82,8 @@ def inspect_cluster(url: str, timeout: float = 5.0) -> dict[str, object]:
     elif flavor.lower() == "oss":
         note = "OSS build estimate; dense_vector is treated as unsupported and kNN support remains unknown without plugin inspection."
     return {
-        "url": safe_url,
+        # URL paths can contain tenant or proxy credentials; report only the origin.
+        "url": _redact_url(url),
         "name": payload.get("name", "unknown"),
         "cluster_name": payload.get("cluster_name", "unknown"),
         "distribution": distribution,
@@ -99,18 +101,37 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     try:
         result = inspect_cluster(args.url, args.timeout)
-    except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc), "url": _redact_url(args.url)}, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(json.dumps({"ok": False, "error": _safe_error(exc), "url": _redact_url(args.url)}, ensure_ascii=False, indent=2))
         raise SystemExit(1) from None
     print(json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2))
 
 
 def _redact_url(url: str) -> str:
-    parts = urlsplit(url)
-    host = parts.hostname or ""
-    if parts.port:
-        host += f":{parts.port}"
-    return urlunsplit((parts.scheme, host, parts.path.rstrip("/"), "", ""))
+    """Return origin only; userinfo, path, query, and fragment are never reported."""
+    try:
+        parts = urlsplit(url)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            return "<redacted>"
+        host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+        port = parts.port
+        authority = host + (f":{port}" if port else "")
+        return urlunsplit((parts.scheme, authority, "", "", ""))
+    except (TypeError, ValueError):
+        return "<redacted>"
+
+
+def _safe_error(exc: Exception) -> str:
+    """Summarize failure type without forwarding exception text from transports."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"Elasticsearch root request failed (HTTP {exc.code})"
+    if isinstance(exc, json.JSONDecodeError):
+        return "Elasticsearch returned invalid JSON"
+    if isinstance(exc, ValueError):
+        return "Invalid Elasticsearch URL or response"
+    if isinstance(exc, (OSError, TimeoutError, urllib.error.URLError)):
+        return "Elasticsearch transport request failed"
+    return "Elasticsearch doctor request failed"
 
 
 if __name__ == "__main__":

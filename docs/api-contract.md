@@ -1,6 +1,6 @@
 # Local API and storage contract
 
-This document describes the loopback HTTP API and local SQLite boundaries through v1.14.0. The workbench is a local application; these routes are not an externally hosted service contract.
+This document describes the loopback HTTP API and local SQLite boundaries through v1.15.0. The workbench is a local application; these routes are not an externally hosted service contract.
 
 ## Transport and authentication
 
