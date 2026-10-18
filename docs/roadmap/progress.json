@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.12.0",
-  "current_stage": "R07",
+  "current_version": "1.13.0",
+  "current_stage": "R08",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 23
+    "started_rounds": 26
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -191,17 +191,25 @@
     {
       "stage": "R08",
       "version": "1.13.0",
-      "status": "pending",
+      "status": "complete",
       "owner_roles": [
         "D",
         "E",
         "F"
       ],
       "required_gates": "docs/acceptance/v1.13.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
-      "commit": null,
-      "blockers": []
+      "fix_rounds_used": 2,
+      "evidence": [
+        "docs/acceptance/v1.13.0.md",
+        "docs/acceptance/v1.13.0-independent-qa.md"
+      ],
+      "implementation_commit": "8b50be380f0c790c549a12a5181aa68d807e189d",
+      "commit": "8b50be380f0c790c549a12a5181aa68d807e189d",
+      "tag": "v1.13.0",
+      "blockers": [
+        "Permission evidence for third-party sample redistribution has been offered but not received or verified; no such material may be bundled.",
+        "Representative permission-cleared public qrels/human judgments are not yet available; the sourced-quality evaluation gate remains NOT RUN."
+      ]
     },
     {
       "stage": "R09",
@@ -270,54 +278,61 @@
   ],
   "current_gates": [
     {
-      "id": "shared-search-interface-bounded-settings",
+      "id": "versioned-query-qrels-io",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "per-result-lane-evidence-identity",
+      "id": "dataset-provenance-and-immutability",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "optional-reranker-install-readiness",
+      "id": "leakage-aware-three-way-splits",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "actual-local-cross-encoder-execution",
+      "id": "judgment-semantics-and-metrics",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "rerank-before-after-evidence",
+      "id": "independent-reference-metrics",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "live-es-modes-filters-alias-account-boundary",
+      "id": "per-query-regressions-and-misses",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
     },
     {
-      "id": "browser-docs-package-regression",
+      "id": "browser-api-storage-compatibility",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+    },
+    {
+      "id": "sourced-quality-evaluation-readiness",
+      "required": false,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.13.0.md; no permission-cleared representative dataset available"
     }
   ],
-  "completed_commit": "a4d68c8882e80bedb7328b75e4af53748517641a",
+  "completed_commit": "8b50be380f0c790c549a12a5181aa68d807e189d",
   "remaining_blockers": [
     "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. The user indicated separate permission evidence can be supplied, but no evidence has been received or verified yet. Recheck with the content owners or remove/replace the data before public release.",
     "GitHub-hosted CI has not run; verify after the final authorized branch push.",
     "Initial hashes for three pre-existing untracked user files were not captured, so byte-for-byte baseline comparison is unavailable.",
-    "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there."
+    "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there.",
+    "The R12 sourced-quality-evaluation-readiness gate is NOT RUN: no permission-cleared, representative corpus and qrels are available."
   ],
   "push": {
     "attempted": false,
