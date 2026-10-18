@@ -8,6 +8,7 @@ import os
 import secrets
 import sqlite3
 import time
+import threading
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ from argon2.exceptions import (  # type: ignore[import-not-found]
     VerificationError,
     VerifyMismatchError,
 )
+from . import storage
 
 SESSION_TTL_SECONDS = 12 * 60 * 60
 COOKIE_NAME = "es_rag_session"
@@ -27,6 +29,7 @@ _hasher = PasswordHasher(time_cost=2, memory_cost=19_456, parallelism=1, type=Ty
 # the same Argon2id verification cost without hashing on each login attempt.
 _DUMMY_PASSWORD_HASH = _hasher.hash("dummy-password-for-timing")
 _csrf_key = secrets.token_bytes(32)
+_BOOTSTRAP_LOCK = threading.Lock()
 
 
 class AuthError(Exception):
@@ -51,9 +54,13 @@ def _connect() -> sqlite3.Connection:
         db.close()
         raise
     db.row_factory = sqlite3.Row
-    db.execute("PRAGMA busy_timeout=10000")
-    _schema(db)
-    return db
+    try:
+        db.execute("PRAGMA busy_timeout=10000")
+        _schema(db)
+        return db
+    except Exception:
+        db.close()
+        raise
 
 
 @contextmanager
@@ -70,30 +77,15 @@ def _db():
 
 
 def _schema(db: sqlite3.Connection) -> None:
-    db.execute("CREATE TABLE IF NOT EXISTS auth_users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','user')), enabled INTEGER NOT NULL DEFAULT 1, primary_state INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)")
-    db.execute("CREATE TABLE IF NOT EXISTS auth_sessions (session_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
-    db.execute("CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(user_id)")
-    db.execute("CREATE TABLE IF NOT EXISTS auth_login_attempts (username_key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL DEFAULT 0)")
-    db.execute("CREATE TABLE IF NOT EXISTS auth_migrations (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, completed_at INTEGER NOT NULL)")
+    storage.migrate(db, "control")
     db.commit()
 
 
 def _prepare_legacy_state_claim(db: sqlite3.Connection) -> None:
-    expected = {
-        "concepts": {"id", "body", "updated_at"},
-        "concept_versions": {"version_id", "concept_id", "version_number", "body", "fingerprint", "created_at", "is_current"},
-        "judgments": {"concept_id", "query_id", "document_index", "document_id", "rating", "pinned", "reason", "updated_at"},
-        "runs": {"id", "concept_id", "created_at", "kind", "body"},
-    }
-    existing = {row["name"] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    for table, required in expected.items():
-        if table not in existing:
-            continue
-        columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
-        if not required.issubset(columns):
-            raise AuthError(f"Legacy {table} schema is incomplete; refusing to claim saved state", 409)
-        if table == "judgments" and "query_fingerprint" not in columns:
-            db.execute("ALTER TABLE judgments ADD COLUMN query_fingerprint TEXT NOT NULL DEFAULT ''")
+    try:
+        storage.migrate(db, "state")
+    except storage.SchemaError:
+        raise AuthError("Legacy saved-state schema is incomplete; refusing to claim saved state", 409) from None
 
 
 def _public_user(row: sqlite3.Row) -> dict[str, Any]:
@@ -118,15 +110,22 @@ def bootstrap_admin(username: str, display_name: str, password: str) -> dict[str
     if not isinstance(password, str) or len(password) < 15 or len(password) > 1024:
         raise AuthError("password must be 15 to 1024 characters")
     password_hash = _hasher.hash(password)
+    with _BOOTSTRAP_LOCK:
+        return _bootstrap_admin_transaction(username, display_name, password_hash)
+
+
+def _bootstrap_admin_transaction(username: str, display_name: str, password_hash: str) -> dict[str, Any]:
     user_id = str(uuid.uuid4())
     with _db() as db:
         try:
+            # Upgrade saved state while no write transaction/claim is active;
+            # migration takes its verified SQLite snapshot before any change.
+            _prepare_legacy_state_claim(db)
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM auth_users LIMIT 1").fetchone():
                 raise AuthError("Initial administrator is already configured", 409)
             if db.execute("SELECT 1 FROM auth_migrations WHERE name='legacy_state_claim' LIMIT 1").fetchone():
                 raise AuthError("Legacy state claim is already recorded but no administrator exists; refusing to continue", 409)
-            _prepare_legacy_state_claim(db)
             # The bootstrap admin claims all legacy rows by owning the existing DB file.
             db.execute("INSERT INTO auth_users(id,username,display_name,password_hash,role,enabled,primary_state,created_at) VALUES(?,?,?,?, 'admin',1,1,?)", (user_id, username, display_name, password_hash, int(time.time())))
             db.execute("INSERT INTO auth_migrations(name,owner_id,completed_at) VALUES('legacy_state_claim',?,?)", (user_id, int(time.time())))

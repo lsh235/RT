@@ -26,16 +26,16 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.6.0",
-  "current_stage": "R01",
-  "overall_status": "ready_to_commit",
+  "current_version": "1.7.0",
+  "current_stage": "R02",
+  "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
   "round_policy": {
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 4
+    "started_rounds": 8
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -43,30 +43,259 @@
     "third_party_sample_data_redistribution": "UNRESOLVED"
   },
   "versions": [
-    {"stage":"R01","version":"1.6.0","status":"ready_to_commit","owner_roles":["A","F","E"],"required_gates":"docs/acceptance/v1.6.0.md","fix_rounds_used":3,"evidence":["docs/acceptance/v1.6.0.md","docs/acceptance/v1.6.0-independent-qa.md"],"commit":null,"blockers":[]},
-    {"stage":"R02","version":"1.7.0","status":"pending","owner_roles":["A","E","F"],"required_gates":"docs/acceptance/v1.7.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R03","version":"1.8.0","status":"pending","owner_roles":["E","A","F"],"required_gates":"docs/acceptance/v1.8.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R04","version":"1.9.0","status":"pending","owner_roles":["C","A","E","F"],"required_gates":"docs/acceptance/v1.9.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R05","version":"1.10.0","status":"pending","owner_roles":["C","B","F"],"required_gates":"docs/acceptance/v1.10.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R06","version":"1.11.0","status":"pending","owner_roles":["B","A","F"],"required_gates":"docs/acceptance/v1.11.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R07","version":"1.12.0","status":"pending","owner_roles":["B","E","F"],"required_gates":"docs/acceptance/v1.12.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R08","version":"1.13.0","status":"pending","owner_roles":["D","E","F"],"required_gates":"docs/acceptance/v1.13.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R09","version":"1.14.0","status":"pending","owner_roles":["D","B","E","F"],"required_gates":"docs/acceptance/v1.14.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R10","version":"1.15.0","status":"pending","owner_roles":["A","D","E","F"],"required_gates":"docs/acceptance/v1.15.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R11","version":"1.16.0-rc.1","status":"pending","owner_roles":["F","A","B","C","D","E"],"required_gates":"docs/acceptance/v1.16.0-rc.1.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
-    {"stage":"R12","version":"1.16.0","status":"pending","owner_roles":["F","coordinator"],"required_gates":"docs/acceptance/v1.16.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]}
+    {
+      "stage": "R01",
+      "version": "1.6.0",
+      "status": "complete",
+      "owner_roles": [
+        "A",
+        "F",
+        "E"
+      ],
+      "required_gates": "docs/acceptance/v1.6.0.md",
+      "fix_rounds_used": 3,
+      "evidence": [
+        "docs/acceptance/v1.6.0.md",
+        "docs/acceptance/v1.6.0-independent-qa.md"
+      ],
+      "commit": "4c541f647c595bb14a2488f7033c89d95716ea0a",
+      "blockers": [
+        "Bundled third-party sample data redistribution rights remain unresolved.",
+        "GitHub-hosted CI remains NOT RUN until final branch push.",
+        "Initial hashes for three pre-existing untracked user files were not captured.",
+        "Source-corpus fingerprint was NOT RUN in the isolated independent Elasticsearch run."
+      ],
+      "tag": "v1.6.0"
+    },
+    {
+      "stage": "R02",
+      "version": "1.7.0",
+      "status": "complete",
+      "owner_roles": [
+        "A",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.7.0.md",
+      "fix_rounds_used": 3,
+      "evidence": [
+        "docs/acceptance/v1.7.0.md",
+        "docs/acceptance/v1.7.0-independent-qa.md"
+      ],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R03",
+      "version": "1.8.0",
+      "status": "pending",
+      "owner_roles": [
+        "E",
+        "A",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.8.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R04",
+      "version": "1.9.0",
+      "status": "pending",
+      "owner_roles": [
+        "C",
+        "A",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.9.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R05",
+      "version": "1.10.0",
+      "status": "pending",
+      "owner_roles": [
+        "C",
+        "B",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.10.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R06",
+      "version": "1.11.0",
+      "status": "pending",
+      "owner_roles": [
+        "B",
+        "A",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.11.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R07",
+      "version": "1.12.0",
+      "status": "pending",
+      "owner_roles": [
+        "B",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.12.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R08",
+      "version": "1.13.0",
+      "status": "pending",
+      "owner_roles": [
+        "D",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.13.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R09",
+      "version": "1.14.0",
+      "status": "pending",
+      "owner_roles": [
+        "D",
+        "B",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.14.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R10",
+      "version": "1.15.0",
+      "status": "pending",
+      "owner_roles": [
+        "A",
+        "D",
+        "E",
+        "F"
+      ],
+      "required_gates": "docs/acceptance/v1.15.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R11",
+      "version": "1.16.0-rc.1",
+      "status": "pending",
+      "owner_roles": [
+        "F",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "required_gates": "docs/acceptance/v1.16.0-rc.1.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    },
+    {
+      "stage": "R12",
+      "version": "1.16.0",
+      "status": "pending",
+      "owner_roles": [
+        "F",
+        "coordinator"
+      ],
+      "required_gates": "docs/acceptance/v1.16.0.md",
+      "fix_rounds_used": 0,
+      "evidence": [],
+      "commit": null,
+      "blockers": []
+    }
   ],
   "current_gates": [
-    {"id":"offline-tests","required":true,"status":"PASS (185 passed; 1 expected skip)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"live-elasticsearch-auth-origin-csrf","required":true,"status":"PASS (19/19 on task-owned ES 9.5.5)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"browser-tests","required":true,"status":"PASS (18/18 synthetic Cycle 44 cases)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"provider-opt-in-and-default-ci-independence","required":true,"status":"PASS (bounded; no live-provider suite)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"clean-wheel-install-and-runtime-smoke","required":true,"status":"PASS","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"offline-and-disposable-es-ci","required":true,"status":"PASS (workflow configuration; hosted run NOT RUN)","evidence":".github/workflows/ci.yml; docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"read-only-elasticsearch-doctor","required":true,"status":"PASS (GET root only; live index list unchanged)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"fresh-environment-install-docs","required":true,"status":"PASS","evidence":"CONTRIBUTING.md; docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"version-metadata","required":true,"status":"PASS (package, UI, and health 1.6.0)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
-    {"id":"user-worktree-preservation","required":true,"status":"PASS (paths remain untracked; initial hashes unavailable)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"}
+    {
+      "id": "existing-behavior",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "route-service-boundaries",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "shared-error-contract",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "legacy-db-migration",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "migration-repeat-failure",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "backup-restore",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "browser-module-split",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "api-architecture-docs",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    },
+    {
+      "id": "worktree-preservation",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.7.0.md; docs/acceptance/v1.7.0-independent-qa.md"
+    }
   ],
   "completed_commit": null,
   "remaining_blockers": [
@@ -75,5 +304,9 @@
     "Initial hashes for three pre-existing untracked user files were not captured, so byte-for-byte baseline comparison is unavailable.",
     "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there."
   ],
-  "push": {"attempted":false,"remote_head":null,"local_remote_sha_match":null}
+  "push": {
+    "attempted": false,
+    "remote_head": null,
+    "local_remote_sha_match": null
+  }
 }

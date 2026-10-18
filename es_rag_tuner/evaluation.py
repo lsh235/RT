@@ -70,7 +70,7 @@ def _msearch(connection: Connection, index: str, bodies: list[dict[str, Any]]) -
         if "error" in response:
             error = response["error"]
             reason = error.get("reason", str(error)) if isinstance(error, dict) else str(error)
-            raise ElasticsearchError(f"평가 검색 실패: {reason}", response.get("status"))
+            raise ElasticsearchError(f"평가 검색 실패: {reason}", response.get("status"), safe_for_user=False)
     return responses
 
 

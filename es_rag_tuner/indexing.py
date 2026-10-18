@@ -44,7 +44,7 @@ def _index_batch(connection: Connection, index: str, hits: list[dict[str, Any]],
                 failed.append({"id": result.get("_id"), "status": result.get("status"), "error": result.get("error")})
             if len(failed) >= 5:
                 break
-        raise ElasticsearchError(f"임베딩 bulk 업데이트 중 일부 실패: {json.dumps(failed, ensure_ascii=False)}")
+        raise ElasticsearchError(f"임베딩 bulk 업데이트 중 일부 실패: {json.dumps(failed, ensure_ascii=False)}", safe_for_user=False)
 
 
 def vectorize_index(connection: Connection, index: str) -> dict[str, Any]:

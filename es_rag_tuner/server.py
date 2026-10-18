@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 from http.cookies import SimpleCookie
 import secrets
+import sqlite3
 
 from . import __version__, codebase
 from . import evaluation
@@ -21,6 +22,8 @@ from . import ai_coach
 from . import token_preview
 from . import auth
 from . import knowledge
+from . import post_routes
+from . import storage
 from .indexing import vectorize_index
 from .es_client import (
     Connection,
@@ -42,6 +45,8 @@ WEB = PACKAGE_DIR / "web"
 STATIC_FILES = {
     "/": WEB / "index.html",
     "/app.js": WEB / "app.js",
+    "/api-client.js": WEB / "api-client.js",
+    "/cycle44-positive-target-misses.js": WEB / "cycle44-positive-target-misses.js",
     "/style.css": WEB / "style.css",
 }
 ALLOWED_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
@@ -72,6 +77,56 @@ def _expected_sample_count() -> int:
 
 def _problem_text(exc: Exception) -> str:
     return str(exc)[:1200]
+
+
+def _error_code(status: int, area: str = "REQUEST") -> str:
+    """Stable machine-readable API error family, independent of prose wording."""
+    if status == 401:
+        return "AUTH_REQUIRED"
+    if status == 403:
+        return "REQUEST_FORBIDDEN"
+    if status == 404:
+        return "NOT_FOUND"
+    if status == 409:
+        return "CONFLICT"
+    if status == 413:
+        return "REQUEST_TOO_LARGE"
+    if status == 429:
+        return "RATE_LIMITED"
+    if status >= 500:
+        return f"{area}_UNAVAILABLE"
+    return "INVALID_REQUEST"
+
+
+def _safe_domain_message(exc: ElasticsearchError) -> str:
+    # Local validation messages are useful to the operator. Remote server and
+    # transport responses can include document text, endpoints, or credentials.
+    if exc.safe_for_user:
+        return _problem_text(exc)
+    return "Elasticsearch 요청을 완료할 수 없습니다. 연결과 인덱스 상태를 확인하세요."
+
+
+def _sample_bulk_failures(items: list[dict[str, Any]], limit: int = 10) -> list[dict[str, Any]]:
+    failures = []
+    for item in items:
+        operation = next(iter(item.values()), {}) if isinstance(item, dict) else {}
+        if not isinstance(operation, dict) or int(operation.get("status", 200)) < 300:
+            continue
+        failures.append({"id": operation.get("_id"), "status": operation.get("status"), "code": "REMOTE_ITEM_REJECTED", "error": "문서 적재를 완료하지 못했습니다."})
+        if len(failures) >= limit:
+            break
+    return failures
+
+
+def _public_token_preview_result(result: dict[str, Any]) -> dict[str, Any]:
+    public = dict(result)
+    public.pop("cache_path", None)
+    reason = public.get("reason")
+    if not public.get("available") and isinstance(reason, str):
+        lower = reason.lower()
+        if any(marker in reason for marker in ("/", "\\")) or any(marker in lower for marker in ("errno", "traceback", "permissionerror", "filenotfounderror", "sqlite")):
+            public["reason"] = "토큰 미리보기를 사용할 수 없습니다. 설치와 로컬 캐시 상태를 확인하세요."
+    return public
 
 
 def _shared_vector_failure_is_unavailable(exc: ElasticsearchError) -> bool:
@@ -108,7 +163,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         else:
             host = raw_host.rsplit(":", 1)[0] if raw_host.count(":") == 1 else raw_host
         if host not in {"localhost", "127.0.0.1", "::1"}:
-            self._json(403, {"error": "이 워크벤치는 loopback에서만 접근할 수 있습니다."})
+            self._api_error(403, "이 워크벤치는 loopback에서만 접근할 수 있습니다.", "REQUEST_FORBIDDEN")
             return False
         origin = self.headers.get("Origin")
         parts = urlsplit(origin or "")
@@ -117,11 +172,11 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         except ValueError:
             origin_port = -1
         if require_origin and (parts.scheme != "http" or parts.username or parts.password or parts.path not in {"", "/"} or parts.query or parts.fragment or parts.hostname not in {"localhost", "127.0.0.1", "::1"} or origin_port != self.server.server_port or parts.hostname != host):
-            self._json(403, {"error": "a same-origin HTTP request is required"})
+            self._api_error(403, "a same-origin HTTP request is required", "REQUEST_FORBIDDEN")
             return False
         host_port = raw_host.rsplit(":", 1)[1] if raw_host.count(":") == 1 else (raw_host.split("]", 1)[1][1:] if raw_host.startswith("[") and "]" in raw_host and raw_host.split("]", 1)[1].startswith(":") else "")
         if host_port != str(self.server.server_port):
-            self._json(403, {"error": "Host does not match this local server"})
+            self._api_error(403, "Host does not match this local server", "REQUEST_FORBIDDEN")
             return False
         return True
 
@@ -153,6 +208,9 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(data)
+
+    def _api_error(self, status: int, message: str, code: str) -> None:
+        self._json(status, {"error": message, "code": code})
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
@@ -205,6 +263,19 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self._pending_cookies = []
+        try:
+            self._handle_get()
+        except auth.AuthError as exc:
+            self._api_error(exc.status, str(exc), _error_code(exc.status, "AUTH"))
+        except storage.SchemaError:
+            self._api_error(503, "로컬 데이터베이스 형식을 확인할 수 없습니다. 데이터를 변경하지 않았습니다.", "STORAGE_SCHEMA_INVALID")
+        except sqlite3.Error:
+            self._api_error(500, "로컬 저장소 작업을 완료하지 못했습니다. 저장 상태를 확인하세요.", "STORAGE_ERROR")
+        except Exception:
+            self._api_error(500, "내부 오류가 발생했습니다. 요청의 민감한 내용은 오류 응답에 포함되지 않습니다.", "INTERNAL_ERROR")
+
+    def _handle_get(self) -> None:
+        self._pending_cookies = []
         if not self._guard_local_request():
             return
         path = urlsplit(self.path).path
@@ -227,7 +298,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/") and path not in {"/api/health"}:
             user = auth.authenticate(self._session_id())
             if not user:
-                self._json(401, {"error": "Authentication required"})
+                self._api_error(401, "Authentication required", "AUTH_REQUIRED")
                 return
             with concepts.owner_scope(user["id"]):
                 self._do_get_protected(path)
@@ -246,23 +317,23 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        self._json(404, {"error": "경로를 찾을 수 없습니다."})
+        self._api_error(404, "경로를 찾을 수 없습니다.", "NOT_FOUND")
 
     def _do_get_protected(self, path: str) -> None:
         if path == "/api/knowledge/es-status":
             try:
                 self._json(200, knowledge.es_status())
             except Exception:
-                self._json(503, {"error": "Private knowledge sync status is temporarily unavailable."})
+                self._api_error(503, "Private knowledge sync status is temporarily unavailable.", "KNOWLEDGE_UNAVAILABLE")
         elif path == "/api/token-preview/status":
-            self._json(200, token_preview.status())
+            self._json(200, _public_token_preview_result(token_preview.status()))
         elif path == "/api/codebase-status":
             try:
                 self._json(200, codebase.status())
             except codebase.CodebaseError as exc:
-                self._json(503, {"error": _problem_text(exc)})
+                self._api_error(503, "코드베이스 기능을 사용할 수 없습니다. 설정을 확인한 뒤 다시 시도하세요.", "DEPENDENCY_UNAVAILABLE")
         else:
-            self._json(404, {"error": "경로를 찾을 수 없습니다."})
+            self._api_error(404, "경로를 찾을 수 없습니다.", "NOT_FOUND")
 
     def do_POST(self) -> None:
         self._pending_cookies = []
@@ -304,76 +375,29 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     raise auth.AuthError("Administrator role required", 403)
                 self._admin_accounts(path, payload)
                 return
-            handler = {
-                "/api/connect": self._connect,
-                "/api/sample-info": self._sample_info,
-                "/api/sample-import": self._sample_import,
-                "/api/vectorize": self._vectorize,
-                "/api/mapping": self._mapping,
-                "/api/search": self._search,
-                "/api/code-rag": self._code_rag,
-                "/api/explain": self._explain,
-                "/api/document": self._document,
-                "/api/token-preview": self._token_preview,
-                "/api/token-preview/prepare": self._token_preview_prepare,
-                "/api/evaluate": self._evaluate,
-                "/api/tune": self._tune,
-                "/api/corpus/schema": self._concept_schema,
-                "/api/concepts/list": self._concept_list,
-                "/api/concepts/save": self._concept_save,
-                "/api/concepts/quickstart": self._concept_quickstart,
-                "/api/concepts/ensure-query": self._concept_ensure_query,
-                "/api/concepts/diagnose": self._concept_diagnose,
-                "/api/concepts/versions": self._concept_versions,
-                "/api/concepts/restore": self._concept_restore,
-                "/api/concepts/export": self._concept_export,
-                "/api/concepts/preview": self._concept_preview,
-                "/api/concepts/information-need-preview": self._concept_information_need_preview,
-                "/api/concepts/vector-candidates": self._concept_vector_candidates,
-                "/api/concepts/mode-comparison": self._concept_mode_comparison,
-                "/api/concepts/mode-comparison-group": self._concept_mode_comparison_group,
-                "/api/concepts/locate-document": self._concept_locate_document,
-                "/api/concepts/document": self._concept_document,
-                "/api/concepts/judge": self._concept_judge,
-                "/api/concepts/tune/readiness": self._concept_tune_readiness,
-                "/api/concepts/tune": self._concept_tune,
-                "/api/concepts/runs": self._concept_runs,
-                "/api/concepts/runs/export": self._concept_run_export,
-                "/api/knowledge/list": lambda payload: knowledge.list_documents(),
-                "/api/knowledge/preview": knowledge.preview,
-                "/api/knowledge/save": knowledge.save_document,
-                "/api/knowledge/get": knowledge.get_document,
-                "/api/knowledge/delete": knowledge.delete_document,
-                "/api/knowledge/search": knowledge.search,
-                "/api/knowledge/es-sync": lambda payload: knowledge.sync_es(self._connection(payload)),
-                "/api/knowledge/es-vector-sync": lambda payload: knowledge.sync_es(self._connection(payload), vector=True, allow_model_download=payload.get("allow_model_download") is True),
-                "/api/knowledge/concept-preview": knowledge.concept_preview,
-                "/api/knowledge/judge": knowledge.judge,
-                "/api/ai/status": self._ai_status,
-                "/api/ai/sessions/create": self._ai_create_session,
-                "/api/ai/sessions/message": self._ai_message,
-                "/api/ai/sessions/history": self._ai_history,
-                "/api/ai/sessions/reset": self._ai_reset,
-                "/api/ai/jobs/get": self._ai_job,
-                "/api/ai/jobs/cancel": self._ai_cancel,
-            }.get(path)
+            handler = post_routes.resolve_post(self, path)
             if not handler:
-                self._json(404, {"error": "API 경로를 찾을 수 없습니다."})
+                self._api_error(404, "API 경로를 찾을 수 없습니다.", "NOT_FOUND")
                 return
             with concepts.owner_scope(user["id"]):
                 self._json(200, handler(payload))
         except auth.AuthError as exc:
-            self._json(exc.status, {"error": str(exc)})
+            self._api_error(exc.status, str(exc), _error_code(exc.status, "AUTH"))
+        except storage.SchemaError:
+            self._api_error(503, "로컬 데이터베이스 형식을 확인할 수 없습니다. 데이터를 변경하지 않았습니다.", "STORAGE_SCHEMA_INVALID")
         except knowledge.KnowledgeError as exc:
-            self._json(exc.status, {"error": str(exc)})
+            self._api_error(exc.status, str(exc), _error_code(exc.status, "KNOWLEDGE"))
         except ElasticsearchError as exc:
-            self._json(exc.status or 400, {"error": _problem_text(exc)})
+            status = exc.status or 400
+            self._api_error(status, _safe_domain_message(exc), _error_code(status, "RETRIEVAL"))
         except codebase.CodebaseError as exc:
-            self._json(503, {"error": _problem_text(exc)})
-        except (OSError, ValueError, TypeError, KeyError) as exc:
-            self._json(400, {"error": _problem_text(exc)})
-        except Exception as exc:  # Keep implementation details out of the local UI.
-            self._json(500, {"error": f"내부 오류: {_problem_text(exc)}"})
+            self._api_error(503, "코드베이스 기능을 사용할 수 없습니다. 설정을 확인한 뒤 다시 시도하세요.", "DEPENDENCY_UNAVAILABLE")
+        except sqlite3.Error:
+            self._api_error(500, "로컬 저장소 작업을 완료하지 못했습니다. 저장 상태를 확인하세요.", "STORAGE_ERROR")
+        except (OSError, ValueError, TypeError, KeyError):
+            self._api_error(400, "요청을 처리할 수 없습니다. 입력값을 확인하세요.", "INVALID_REQUEST")
+        except Exception:  # Never send implementation details to the browser.
+            self._api_error(500, "내부 오류가 발생했습니다. 로그에 민감한 요청 내용은 기록되지 않습니다.", "INTERNAL_ERROR")
 
     def _admin_accounts(self, path: str, payload: dict[str, Any]) -> None:
         if path == "/api/admin/accounts/list":
@@ -393,7 +417,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             auth.disable_account(payload.get("user_id", ""))
             self._json(200, {"disabled": True})
         else:
-            self._json(404, {"error": "API path not found"})
+            self._api_error(404, "API path not found", "NOT_FOUND")
 
     def _connect(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
@@ -403,7 +427,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             indices_error = None
         except ElasticsearchError as exc:
             indices = []
-            indices_error = _problem_text(exc)
+            indices_error = _safe_domain_message(exc)
         index = self._index(payload)
         exists = index_exists(connection, index)
         count = count_documents(connection, index) if exists else 0
@@ -518,13 +542,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             timeout=90,
         )
         if bulk.get("errors"):
-            failures = []
-            for item in bulk.get("items", []):
-                operation = next(iter(item.values()), {})
-                if int(operation.get("status", 200)) >= 300:
-                    failures.append({"id": operation.get("_id"), "status": operation.get("status"), "error": operation.get("error")})
-                if len(failures) >= 10:
-                    break
+            failures = _sample_bulk_failures(bulk.get("items", []))
             try:
                 partial_count = count_documents(connection, index)
             except ElasticsearchError:
@@ -718,7 +736,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         input_text = payload.get("input_text")
         if not isinstance(input_text, str):
             raise ElasticsearchError("input_text는 문자열이어야 합니다.")
-        return token_preview.preview_input(input_text)
+        return _public_token_preview_result(token_preview.preview_input(input_text))
 
     @staticmethod
     def _token_preview_prepare(payload: dict[str, Any]) -> dict[str, Any]:
@@ -726,7 +744,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         # or document-text parameters. Preparation is an explicit local action.
         if payload:
             raise ElasticsearchError("토크나이저 준비 요청 본문은 빈 object여야 합니다.")
-        return token_preview.prepare()
+        return _public_token_preview_result(token_preview.prepare())
 
     def _evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
@@ -899,6 +917,26 @@ def main() -> None:
         except auth.AuthError as exc:
             raise SystemExit(str(exc)) from None
         print(f"Administrator password reset for {username.strip().lower()}; prior sessions were revoked.")
+        return
+    if sys.argv[1:2] in (["db-backup"], ["db-restore"]):
+        from .db_maintenance import MaintenanceError, backup_database, restore_database
+
+        command = sys.argv[1]
+        maintenance_parser = argparse.ArgumentParser(description="Offline local SQLite maintenance")
+        maintenance_parser.add_argument("--source", required=True, help="explicit source SQLite file")
+        maintenance_parser.add_argument("--destination", required=True, help="explicit destination SQLite file")
+        if command == "db-restore":
+            maintenance_parser.add_argument("--offline-confirmed", action="store_true", help="confirm the workbench process is stopped")
+        maintenance_args = maintenance_parser.parse_args(sys.argv[2:])
+        try:
+            if command == "db-backup":
+                backup_database(maintenance_args.source, maintenance_args.destination)
+                print("Verified SQLite backup created.")
+            else:
+                restore_database(maintenance_args.source, maintenance_args.destination, offline_confirmed=maintenance_args.offline_confirmed)
+                print("Verified SQLite database restored.")
+        except MaintenanceError as exc:
+            raise SystemExit(str(exc)) from None
         return
     parser = argparse.ArgumentParser(description="Local Elasticsearch RAG retrieval tuning workbench")
     parser.add_argument("--host", default="127.0.0.1", help="loopback address only (default: 127.0.0.1)")

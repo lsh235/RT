@@ -17,6 +17,7 @@ from typing import Any, Iterator
 from urllib.parse import quote
 
 from . import embeddings
+from . import storage
 from .es_client import Connection, ElasticsearchError, request, validate_index, bind_local_owner, reset_local_owner
 from .retrieval import count_vectors, vector_mapping_targets
 
@@ -79,9 +80,9 @@ def _connect_db() -> Iterator[sqlite3.Connection]:
     try:
         db.execute("PRAGMA busy_timeout=30000")
         db.execute("PRAGMA journal_mode=WAL")
-        # Serialize owner validation and all first-open DDL. Commit this setup
-        # transaction before handing the connection to callers that may start
-        # their own write transaction.
+        # Snapshot and apply versioned schema changes before writing the
+        # account ownership marker. Then serialize owner validation.
+        storage.migrate(db, "state")
         db.execute("BEGIN IMMEDIATE")
         owner_id = _OWNER_ID.get()
         if owner_id:
@@ -91,13 +92,6 @@ def _connect_db() -> Iterator[sqlite3.Connection]:
                 raise ElasticsearchError("Saved-state database owner marker is inconsistent", 503)
             if not owner:
                 db.execute("INSERT INTO state_owner(singleton,owner_id) VALUES(1,?)", (owner_id,))
-        db.execute("CREATE TABLE IF NOT EXISTS concepts (id TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at TEXT NOT NULL)")
-        db.execute("CREATE TABLE IF NOT EXISTS concept_versions (version_id TEXT PRIMARY KEY, concept_id TEXT NOT NULL, version_number INTEGER NOT NULL, body TEXT NOT NULL, fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, is_current INTEGER NOT NULL DEFAULT 1, UNIQUE(concept_id, version_number))")
-        db.execute("CREATE TABLE IF NOT EXISTS judgments (concept_id TEXT NOT NULL, query_id TEXT NOT NULL, document_index TEXT NOT NULL, document_id TEXT NOT NULL, rating INTEGER, pinned INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL, query_fingerprint TEXT NOT NULL DEFAULT '', PRIMARY KEY (concept_id, query_id, document_index, document_id))")
-        db.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, concept_id TEXT NOT NULL, created_at TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL)")
-        judgment_columns = {row["name"] for row in db.execute("PRAGMA table_info(judgments)")}
-        if "query_fingerprint" not in judgment_columns:
-            db.execute("ALTER TABLE judgments ADD COLUMN query_fingerprint TEXT NOT NULL DEFAULT ''")
         db.commit()
         yield db
         db.commit()
@@ -110,6 +104,12 @@ def _connect_db() -> Iterator[sqlite3.Connection]:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _public_failure_message(exc: Exception, fallback: str) -> str:
+    if isinstance(exc, ElasticsearchError) and exc.safe_for_user:
+        return str(exc).strip()[:1200] or fallback
+    return fallback
 
 
 def _json_hash(value: Any) -> str:
@@ -159,7 +159,7 @@ def information_need_preview(connection: Connection, concept_id: str, query_id: 
             result = preview(connection, concept, query_id=item["id"])
             results.append({"query_id": item["id"], "query": item["query"], "split": item["split"], "preview": result})
         except ElasticsearchError as exc:
-            failures.append({"query_id": item["id"], "query": item["query"], "split": item["split"], "error": str(exc)[:1200]})
+            failures.append({"query_id": item["id"], "query": item["query"], "split": item["split"], "error": _public_failure_message(exc, "이 질의의 미리보기를 완료하지 못했습니다.")})
         except Exception:
             failures.append({"query_id": item["id"], "query": item["query"], "split": item["split"], "error": "이 질의의 미리보기를 완료하지 못했습니다."})
     status = "complete" if not failures else "partial"
@@ -1179,7 +1179,7 @@ def _vector_candidates_for_saved_query(connection: Connection, concept: dict[str
     try:
         query_vector = embeddings.embed_texts([saved_query["query"]], "query", local_files_only=True)[0]
     except Exception as exc:
-        raise ElasticsearchError(f"질의 임베딩을 준비하지 못했습니다: {str(exc)[:300]}", 503) from None
+        raise ElasticsearchError(f"질의 임베딩을 준비하지 못했습니다: {str(exc)[:300]}", 503, safe_for_user=False) from None
     if not isinstance(query_vector, list) or len(query_vector) != embeddings.MODEL_DIMENSIONS:
         raise ElasticsearchError("질의 임베딩 응답의 차원이 올바르지 않습니다.", 503)
     filters = concept["filters"] if effective_filters is None else effective_filters
@@ -1377,7 +1377,7 @@ def mode_comparison_group(connection: Connection, concept_id: str, query_id: str
             except Exception as exc:
                 retrieval_errors.append(exc)
             if retrieval_errors:
-                raise ElasticsearchError("; ".join(str(error)[:500] for error in retrieval_errors)[:1200], 503)
+                raise ElasticsearchError("; ".join(str(error)[:500] for error in retrieval_errors)[:1200], 503, safe_for_user=False)
             assert bm25_hits is not None and vector is not None and concrete_indices is not None
             if any(hit["_index"] not in concrete_indices for hit in bm25_hits):
                 raise ElasticsearchError("BM25 비교 결과의 concrete _index가 alias 매핑 대상에 없습니다.", 503)
@@ -1411,7 +1411,7 @@ def mode_comparison_group(connection: Connection, concept_id: str, query_id: str
                                        "candidate_count": len(vector_keys), "total": vector["total"]},
                             "bm25": {"candidate_count": len(bm25_keys)}})
         except Exception as exc:
-            message = str(exc).strip()[:1200] or "이 저장 질의의 두 검색을 완료하지 못했습니다."
+            message = _public_failure_message(exc, "이 저장 질의의 두 검색을 완료하지 못했습니다.")
             failures.append({"query_id": qid, "query": saved_query["query"],
                              "split": saved_query["split"], "error": message})
 

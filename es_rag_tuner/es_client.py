@@ -15,9 +15,10 @@ from typing import Any
 
 
 class ElasticsearchError(RuntimeError):
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, *, safe_for_user: bool = True):
         super().__init__(message)
         self.status = status
+        self.safe_for_user = safe_for_user
 
 
 class PrivateIndexAccessError(ElasticsearchError):
@@ -229,10 +230,10 @@ def request(
                 reason = str(error)
         except (ValueError, AttributeError):
             reason = raw.strip() or exc.reason
-        raise ElasticsearchError(f"Elasticsearch HTTP {exc.code}: {reason}", exc.code) from None
+        raise ElasticsearchError(f"Elasticsearch HTTP {exc.code}: {reason}", exc.code, safe_for_user=False) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         reason = getattr(exc, "reason", exc)
-        raise ElasticsearchError(f"Elasticsearch에 연결할 수 없습니다: {reason}") from None
+        raise ElasticsearchError("Elasticsearch에 연결할 수 없습니다. 연결 주소와 서비스 상태를 확인하세요.", safe_for_user=False) from None
     except json.JSONDecodeError:
         raise ElasticsearchError("Elasticsearch가 JSON이 아닌 응답을 반환했습니다.") from None
 

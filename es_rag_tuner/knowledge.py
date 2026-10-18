@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import quote
 
 from . import concepts
+from . import storage
 from . import embeddings, token_preview
 from .es_client import Connection, ElasticsearchError, private_alias, private_read_scope, private_sync_scope, request, validate_index
 
@@ -103,18 +104,7 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _schema(db: sqlite3.Connection) -> None:
-    db.execute("CREATE TABLE IF NOT EXISTS knowledge_documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, source_label TEXT NOT NULL, content TEXT NOT NULL, content_bytes INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
-    db.execute("CREATE INDEX IF NOT EXISTS knowledge_documents_updated ON knowledge_documents(updated_at DESC, id)")
-    db.execute("CREATE TABLE IF NOT EXISTS knowledge_chunks (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL, content TEXT NOT NULL, UNIQUE(document_id, ordinal))")
-    db.execute("CREATE INDEX IF NOT EXISTS knowledge_chunks_document ON knowledge_chunks(document_id, ordinal)")
-    db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(content, title, source_label, document_id UNINDEXED, chunk_id UNINDEXED, tokenize='unicode61')")
-    db.execute("CREATE TABLE IF NOT EXISTS knowledge_judgments (concept_id TEXT NOT NULL, query_id TEXT NOT NULL, document_id TEXT NOT NULL, query_fingerprint TEXT NOT NULL, document_fingerprint TEXT NOT NULL, source_label TEXT NOT NULL, rating INTEGER, updated_at TEXT NOT NULL, PRIMARY KEY(concept_id,query_id,document_id))")
-    db.execute("CREATE TABLE IF NOT EXISTS knowledge_es_state (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL DEFAULT 'stale', generation INTEGER NOT NULL DEFAULT 0, indexed_chunks INTEGER NOT NULL DEFAULT 0, local_fingerprint TEXT NOT NULL DEFAULT '', synced_fingerprint TEXT NOT NULL DEFAULT '', last_synced_at TEXT, error TEXT NOT NULL DEFAULT '', vector_state TEXT NOT NULL DEFAULT 'not_indexed', vector_recipe TEXT NOT NULL DEFAULT '', vector_chunks INTEGER NOT NULL DEFAULT 0)")
-    columns = {row[1] for row in db.execute("PRAGMA table_info(knowledge_es_state)")}
-    for name, definition in (("vector_state", "TEXT NOT NULL DEFAULT 'not_indexed'"), ("vector_recipe", "TEXT NOT NULL DEFAULT ''"), ("vector_chunks", "INTEGER NOT NULL DEFAULT 0")):
-        if name not in columns:
-            db.execute(f"ALTER TABLE knowledge_es_state ADD COLUMN {name} {definition}")
-    db.execute("INSERT OR IGNORE INTO knowledge_es_state(id,state) VALUES(1,'stale')")
+    storage.migrate(db, "state")
     # Schema bootstrap must not leave an implicit transaction open: save/delete
     # start their own BEGIN IMMEDIATE transaction after this helper returns.
     db.commit()
@@ -692,7 +682,8 @@ def _saved_context(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, A
     try:
         concept = concepts.get_saved_concept(concept_id)
     except concepts.ElasticsearchError as exc:
-        raise KnowledgeError(str(exc), exc.status or 400) from None
+        message = str(exc) if exc.safe_for_user else "Saved knowledge context is unavailable."
+        raise KnowledgeError(message, exc.status or 400) from None
     query = next((item for item in concept["queries"] if item["id"] == query_id), None)
     if query is None:
         raise KnowledgeError("Saved query not found", 404)

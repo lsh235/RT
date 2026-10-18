@@ -223,7 +223,11 @@ class Cycle38KnowledgeAcceptance(unittest.TestCase):
         with mock.patch.object(server, "_problem_text", side_effect=lambda exc: str(exc)):
             status, error = self.admin_client.post("/api/knowledge/save", {"title": "new", "source_label": "fixture", "content": "aftervalue"})
         self.assertEqual(status, 500)
+        self.assertEqual(error["code"], "STORAGE_ERROR")
+        self.assertEqual(error["error"], "로컬 저장소 작업을 완료하지 못했습니다. 저장 상태를 확인하세요.")
         self.assertNotIn("aftervalue", json.dumps(error))
+        self.assertNotIn("injected", json.dumps(error))
+        self.assertNotIn("sqlite", json.dumps(error).lower())
         with sqlite3.connect(db_path) as db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM knowledge_documents").fetchone()[0], 1)
             self.assertEqual(db.execute("SELECT content FROM knowledge_documents WHERE id=?", (doc_id,)).fetchone()[0], "beforevalue")

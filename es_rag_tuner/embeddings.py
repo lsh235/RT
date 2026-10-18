@@ -65,7 +65,7 @@ def _model(*, local_files_only: bool = False) -> Any:
                     local_files_only=local_files_only,
                 )
             except Exception as exc:
-                raise ElasticsearchError(f"임베딩 모델을 불러오지 못했습니다: {exc}") from None
+                raise ElasticsearchError(f"임베딩 모델을 불러오지 못했습니다: {exc}", safe_for_user=False) from None
     return _MODEL
 
 
@@ -94,7 +94,7 @@ def embed_texts(texts: list[str], role: str, *, local_files_only: bool = False) 
     except ElasticsearchError:
         raise
     except Exception as exc:
-        raise ElasticsearchError(f"텍스트 임베딩 생성에 실패했습니다: {exc}") from None
+        raise ElasticsearchError(f"텍스트 임베딩 생성에 실패했습니다: {exc}", safe_for_user=False) from None
 
 
 def document_text(source: dict[str, Any]) -> str:

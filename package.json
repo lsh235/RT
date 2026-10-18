@@ -1,7 +1,7 @@
 {
   "name": "es-rag-tuning-workbench",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Browser smoke tooling for the local Elasticsearch RAG workbench",
   "scripts": {
     "test:browser": "node scripts/browser_smoke.mjs && node tests/cycle44_positive_target_misses_browser.js"
