@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 30
+    "started_rounds": 32
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -253,7 +253,7 @@
     {
       "stage": "R10",
       "version": "1.15.0",
-      "status": "in_progress",
+      "status": "complete",
       "owner_roles": [
         "A",
         "D",
@@ -261,17 +261,33 @@
         "F"
       ],
       "required_gates": "docs/acceptance/v1.15.0.md",
-      "fix_rounds_used": 0,
+      "fix_rounds_used": 2,
       "evidence": [
-        "docs/acceptance/v1.15.0.md"
+        "docs/acceptance/v1.15.0.md",
+        "docs/acceptance/v1.15.0-independent-qa.md",
+        "docs/external-runtime.md"
       ],
-      "commit": null,
-      "blockers": [
-        "Implementation and independent QA are in progress; no R10 gate is yet accepted."
-      ],
-      "implementation_commit": null,
+      "commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
+      "blockers": [],
+      "implementation_commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
       "acceptance_commit": null,
-      "round_log": []
+      "round_log": [
+        {
+          "round": 1,
+          "kind": "offline_runner_collection_path",
+          "status": "complete",
+          "finding": "Independent QA found pytest collection could not import the repository examples namespace when the offline runner was invoked by script path.",
+          "resolution": "Added repository root to sys.path before pytest collection; the independent full offline runner passed 301 tests with 1 skipped."
+        },
+        {
+          "round": 2,
+          "kind": "doctor_contract_regression_expectation",
+          "status": "complete",
+          "finding": "A legacy doctor test expected a URL path in report output, conflicting with R10 origin-only redaction.",
+          "resolution": "Updated the legacy expectation to the fixed origin-only doctor output while retaining a check that requests use the configured full URL; focused and independent full-suite retests passed."
+        }
+      ],
+      "tag": null
     },
     {
       "stage": "R11",
@@ -310,53 +326,53 @@
     {
       "id": "external-profile-runtime-example",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "context-bundle-identity-dedup-token-budget",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "experiment-evidence-fingerprint-preservation",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "secret-free-doctor-diagnostics",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "bounded-runtime-measurements",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "sqlite-backup-restore-preservation",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "regression-install-docs-preservation",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.15.0.md"
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.15.0-independent-qa.md"
     },
     {
       "id": "sourced-quality-evaluation-readiness",
       "required": false,
       "status": "NOT RUN",
-      "evidence": "No permission-cleared representative dataset has been received."
+      "evidence": "No permission-cleared representative dataset has been received; see docs/acceptance/v1.15.0-independent-qa.md."
     }
   ],
-  "completed_commit": "5ffb1b3559f01ecded86eff49a4f57aaf047026f",
+  "completed_commit": "9fb2ce615c4ea5ea7ec168c8faf64cf381160927",
   "remaining_blockers": [
     "Third-party redistribution rights for the bundled sample remain unresolved; the user said separate permission evidence can be provided, but no evidence has been received or verified. Do not bundle new third-party sample content; reassess this asset for final public release.",
     "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the R12 sourced-quality gate remains NOT RUN and final outcome remains NO-GO unless this evidence is supplied and evaluated.",
