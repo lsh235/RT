@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.8.0",
-  "current_stage": "R03",
+  "current_version": "1.9.0",
+  "current_stage": "R04",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 11
+    "started_rounds": 13
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -101,13 +101,14 @@
         "docs/acceptance/v1.8.0.md",
         "docs/acceptance/v1.8.0-independent-qa.md"
       ],
-      "commit": null,
-      "blockers": []
+      "commit": "2dbe59482ddb3835697f7475bc524cc74b0deb08",
+      "blockers": [],
+      "tag": "v1.8.0"
     },
     {
       "stage": "R04",
       "version": "1.9.0",
-      "status": "pending",
+      "status": "complete",
       "owner_roles": [
         "C",
         "A",
@@ -115,10 +116,16 @@
         "F"
       ],
       "required_gates": "docs/acceptance/v1.9.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
+      "fix_rounds_used": 1,
+      "evidence": [
+        "docs/acceptance/v1.9.0.md",
+        "docs/acceptance/v1.9.0-independent-qa.md",
+        "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      ],
       "commit": null,
-      "blockers": []
+      "blockers": [
+        "Representative retrieval-quality evaluation was NOT RUN in R04; the live Elasticsearch corpus was one synthetic document and the check was a lifecycle/BM25 smoke test only."
+      ]
     },
     {
       "stage": "R05",
@@ -247,58 +254,64 @@
   ],
   "current_gates": [
     {
-      "id": "first-use-journey",
+      "id": "format-parsing-field-mapping",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "sample-real-index-clarity",
+      "id": "validation-partial-success",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "non-secret-connection-profiles",
+      "id": "provenance-revision-duplicates",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "recovery-guidance",
+      "id": "crud-search-state-integration",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "ko-en-ui",
+      "id": "account-usage-limits",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "keyboard-responsive",
+      "id": "document-judgment-export-restore",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "existing-behavior",
+      "id": "account-isolation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "live-app-elasticsearch",
+      "id": "browser-import-lifecycle",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "status": "PASS (mock API)",
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     },
     {
-      "id": "docs-and-preservation",
+      "id": "private-elasticsearch-state",
+      "required": true,
+      "status": "PASS (task-owned local ES)",
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+    },
+    {
+      "id": "regression-docs-preservation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.8.0.md; docs/acceptance/v1.8.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
     }
   ],
   "completed_commit": null,

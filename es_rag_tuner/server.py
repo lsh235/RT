@@ -49,6 +49,10 @@ STATIC_FILES = {
     "/cycle44-positive-target-misses.js": WEB / "cycle44-positive-target-misses.js",
     "/style.css": WEB / "style.css",
 }
+# JSON can escape each stored control character as six ASCII bytes. This bound
+# accommodates the 20 MiB account quota plus JSON framing on restore routes.
+_ORDINARY_JSON_LIMIT = 2 * 1024 * 1024
+_RESTORE_JSON_LIMIT = 128 * 1024 * 1024
 ALLOWED_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 DISPLAY_FIELDS = [
     "issue_key", "summary", "status", "priority", "components", "error_signature",
@@ -212,10 +216,10 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def _api_error(self, status: int, message: str, code: str) -> None:
         self._json(status, {"error": message, "code": code})
 
-    def _read_json(self) -> dict[str, Any]:
+    def _read_json(self, *, max_bytes: int = _ORDINARY_JSON_LIMIT) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
-        if length < 0 or length > 2 * 1024 * 1024:
-            raise ElasticsearchError("요청이 너무 큽니다 (최대 2 MiB).")
+        if length < 0 or length > max_bytes:
+            raise ElasticsearchError("요청 본문이 허용된 크기를 초과했습니다.")
         try:
             value = json.loads(self.rfile.read(length) or b"{}")
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -340,9 +344,18 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         if not self._guard_local_request(require_origin=True):
             return
         try:
-            payload = self._read_json()
             path = urlsplit(self.path).path
             session_id = self._session_id()
+            max_bytes = _ORDINARY_JSON_LIMIT
+            content_length = int(self.headers.get("Content-Length", "0"))
+            if path in {"/api/knowledge/restore/preview", "/api/knowledge/restore/commit"} and content_length > _ORDINARY_JSON_LIMIT:
+                restore_user = auth.authenticate(session_id)
+                if not restore_user:
+                    raise auth.AuthError("Authentication required", 401)
+                if not auth.verify_csrf(session_id, self.headers.get("X-CSRF-Token")):
+                    raise auth.AuthError("CSRF validation failed", 403)
+                max_bytes = _RESTORE_JSON_LIMIT
+            payload = self._read_json(max_bytes=max_bytes)
             if path == "/api/auth/login":
                 nonce = self._cookies().get("es_rag_login_nonce")
                 if not auth.is_configured():

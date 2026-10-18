@@ -2,6 +2,13 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.9.0] - 2026-10-19
+
+- Add account-local TXT, Markdown, CSV, and JSONL import with strict decoding, field mapping, row-level outcomes, duplicate actions, and source/content hashes.
+- Track revisions for any changed document content or metadata, including import provenance, while preserving unchanged retries.
+- Add versioned account knowledge export and conflict-aware restore for documents and private judgments, with account usage limits and private Elasticsearch stale-state updates.
+- Migrate account-local document metadata repeatably and serialize first-open WAL setup with schema migration for each database file.
+
 ## [1.8.0] - 2026-10-19
 
 - Add a guided first-use path for Elasticsearch connection, field inspection, first search, human relevance judgments, and retrieval-mode comparison.

@@ -11,6 +11,7 @@ import sqlite3
 import os
 import tempfile
 import threading
+import hashlib
 from pathlib import Path
 
 
@@ -41,6 +42,31 @@ _KNOWN_TABLES = set(_STATE_REQUIRED) | set(_CONTROL_REQUIRED) | {
 }
 _MIGRATION_LOCKS: dict[str, threading.RLock] = {}
 _MIGRATION_LOCKS_GUARD = threading.Lock()
+
+
+def file_lock_for_path(path: str | os.PathLike[str]) -> threading.RLock:
+    """Return the process-local lock shared by opens and migrations for a DB file."""
+    lock_key = str(Path(path).expanduser().resolve())
+    with _MIGRATION_LOCKS_GUARD:
+        return _MIGRATION_LOCKS.setdefault(lock_key, threading.RLock())
+
+
+def _file_lock(db: sqlite3.Connection) -> threading.RLock:
+    row = db.execute("PRAGMA database_list").fetchone()
+    filename = str(row[2]) if row else ""
+    if filename:
+        return file_lock_for_path(filename)
+    lock_key = f"memory:{id(db)}"
+    with _MIGRATION_LOCKS_GUARD:
+        return _MIGRATION_LOCKS.setdefault(lock_key, threading.RLock())
+
+
+def configure_journal_mode(db: sqlite3.Connection, mode: str = "WAL") -> None:
+    """Configure the supported local journal mode under the schema setup lock."""
+    if mode != "WAL":
+        raise ValueError("unsupported journal mode")
+    with _file_lock(db):
+        db.execute("PRAGMA journal_mode=WAL")
 
 
 def _tables(db: sqlite3.Connection) -> set[str]:
@@ -163,19 +189,32 @@ def _control_v1(db: sqlite3.Connection) -> None:
     db.execute("CREATE TABLE IF NOT EXISTS auth_migrations (name TEXT PRIMARY KEY, owner_id TEXT NOT NULL, completed_at INTEGER NOT NULL)")
 
 
-_MIGRATIONS = {"state": {1: _state_v1}, "control": {1: _control_v1}}
+def _state_v2(db: sqlite3.Connection) -> None:
+    """Add import provenance and revision metadata without rewriting documents."""
+    columns = _columns(db, "knowledge_documents")
+    additions = (
+        ("source_name", "TEXT NOT NULL DEFAULT ''"),
+        ("source_record", "TEXT NOT NULL DEFAULT ''"),
+        ("source_sha256", "TEXT NOT NULL DEFAULT ''"),
+        ("content_sha256", "TEXT NOT NULL DEFAULT ''"),
+        ("revision", "INTEGER NOT NULL DEFAULT 1"),
+    )
+    for name, definition in additions:
+        if name not in columns:
+            db.execute(f"ALTER TABLE knowledge_documents ADD COLUMN {name} {definition}")
+    for row in db.execute("SELECT id,content FROM knowledge_documents WHERE content_sha256='' ").fetchall():
+        digest = hashlib.sha256(str(row[1]).encode("utf-8")).hexdigest()
+        db.execute("UPDATE knowledge_documents SET content_sha256=? WHERE id=?", (digest, row[0]))
+
+
+_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2}, "control": {1: _control_v1}}
 
 
 def migrate(db: sqlite3.Connection, component: str) -> None:
     """Apply all known migrations for one file component atomically/idempotently."""
     if component not in _MIGRATIONS:
         raise ValueError("unknown database component")
-    row = db.execute("PRAGMA database_list").fetchone()
-    filename = str(row[2]) if row else ""
-    lock_key = str(Path(filename).absolute()) if filename else f"memory:{id(db)}"
-    with _MIGRATION_LOCKS_GUARD:
-        lock = _MIGRATION_LOCKS.setdefault(lock_key, threading.RLock())
-    with lock:
+    with _file_lock(db):
         _migrate_locked(db, component)
 
 

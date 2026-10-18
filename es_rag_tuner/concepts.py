@@ -69,37 +69,46 @@ def _db_path() -> Path:
 @contextmanager
 def _connect_db() -> Iterator[sqlite3.Connection]:
     db_path = _db_path()
-    # Give concurrent first-open requests enough time to serialize schema setup.
-    db = sqlite3.connect(db_path, timeout=30)
+    db: sqlite3.Connection | None = None
     try:
-        db_path.chmod(0o600)
-    except OSError:
-        db.close()
-        raise
-    db.row_factory = sqlite3.Row
-    try:
-        db.execute("PRAGMA busy_timeout=30000")
-        db.execute("PRAGMA journal_mode=WAL")
-        # Snapshot and apply versioned schema changes before writing the
-        # account ownership marker. Then serialize owner validation.
-        storage.migrate(db, "state")
-        db.execute("BEGIN IMMEDIATE")
-        owner_id = _OWNER_ID.get()
-        if owner_id:
-            db.execute("CREATE TABLE IF NOT EXISTS state_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), owner_id TEXT NOT NULL)")
-            owner = db.execute("SELECT owner_id FROM state_owner WHERE singleton=1").fetchone()
-            if owner and owner["owner_id"] != owner_id:
-                raise ElasticsearchError("Saved-state database owner marker is inconsistent", 503)
-            if not owner:
-                db.execute("INSERT INTO state_owner(singleton,owner_id) VALUES(1,?)", (owner_id,))
-        db.commit()
+        # Serialize file creation/open as well as journal and schema setup.
+        # SQLite connections opened simultaneously against a missing file can
+        # race while initializing the database header, before a connection
+        # level PRAGMA or migration lock can take effect.
+        with storage.file_lock_for_path(db_path):
+            db = sqlite3.connect(db_path, timeout=30)
+            try:
+                db_path.chmod(0o600)
+            except OSError:
+                db.close()
+                db = None
+                raise
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=30000")
+            storage.configure_journal_mode(db)
+            # Snapshot and apply versioned schema changes before writing the
+            # account ownership marker. Then serialize owner validation.
+            storage.migrate(db, "state")
+            db.execute("BEGIN IMMEDIATE")
+            owner_id = _OWNER_ID.get()
+            if owner_id:
+                db.execute("CREATE TABLE IF NOT EXISTS state_owner (singleton INTEGER PRIMARY KEY CHECK(singleton=1), owner_id TEXT NOT NULL)")
+                owner = db.execute("SELECT owner_id FROM state_owner WHERE singleton=1").fetchone()
+                if owner and owner["owner_id"] != owner_id:
+                    raise ElasticsearchError("Saved-state database owner marker is inconsistent", 503)
+                if not owner:
+                    db.execute("INSERT INTO state_owner(singleton,owner_id) VALUES(1,?)", (owner_id,))
+            db.commit()
+        assert db is not None
         yield db
         db.commit()
     except Exception:
-        db.rollback()
+        if db is not None:
+            db.rollback()
         raise
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def _now() -> str:

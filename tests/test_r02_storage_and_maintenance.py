@@ -48,7 +48,7 @@ def test_legacy_state_migration_is_transactional_idempotent_and_preserves_rows(t
     assert tuple(judgment) == (2, "keep", "")
     state = db.execute("SELECT state,generation,indexed_chunks,local_fingerprint,synced_fingerprint FROM knowledge_es_state WHERE id=1").fetchone()
     assert tuple(state) == ("synced", 7, 4, "local-fp", "remote-fp")
-    assert [tuple(row) for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state'")] == [(1,)]
+    assert [tuple(row) for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version")] == [(1,), (2,)]
     assert {row[1] for row in db.execute("PRAGMA table_info(knowledge_es_state)")} >= {"vector_state", "vector_recipe", "vector_chunks"}
     db.close()
 
@@ -109,7 +109,7 @@ def test_backup_and_restore_use_verified_private_snapshots(tmp_path):
     base_db.execute("INSERT INTO concept_versions VALUES('v1','c1',1,'{}','fp','now',1)")
     base_db.execute("INSERT INTO judgments(concept_id,query_id,document_index,document_id,rating,pinned,reason,updated_at,query_fingerprint) VALUES('c1','q1','idx','d1',2,0,'keep','now','qfp')")
     base_db.execute("INSERT INTO runs VALUES('r1','c1','now','eval','{}')")
-    base_db.execute("INSERT INTO knowledge_documents VALUES('doc1','Title','Source','private body',12,'now','now')")
+    base_db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at) VALUES('doc1','Title','Source','private body',12,'now','now')")
     base_db.execute("INSERT INTO knowledge_chunks VALUES('chunk1','doc1',0,0,12,'private body')")
     base_db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES('private body','Title','Source','doc1','chunk1')")
     base_db.execute("INSERT INTO knowledge_judgments VALUES('c1','q1','doc1','qfp','dfp','Source',3,'now')")

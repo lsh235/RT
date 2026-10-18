@@ -76,6 +76,8 @@ const state = {
   knowledgeEvalRequest: 0,
   knowledgeEvalInFlight: false,
   knowledgeControlsBound: false,
+  knowledgeImport: null,
+  knowledgeRestore: null,
   conceptFilters: [],
   conceptSettings: { concept_weight: 1, related_weight: 1, size: 10, candidate_size: 50, mode: "bm25", rank_constant: 60, field_boosts: {} },
   aiProviders: [], aiSession: null, aiJobId: null, aiJobTimer: null, aiLastDraft: null, aiLastMessage: "",
@@ -864,6 +866,8 @@ function activateTab(tabId) {
 }
 
 const KNOWLEDGE_MAX_BYTES = 1024 * 1024;
+const KNOWLEDGE_ACCOUNT_MAX_BYTES = 20 * 1024 * 1024;
+const KNOWLEDGE_RESTORE_MAX_BYTES = 128 * 1024 * 1024;
 
 function knowledgeFields() {
   return {
@@ -934,7 +938,12 @@ async function syncKnowledgeEs() {
     const status = await api("/api/knowledge/es-sync", { connection: getConnection() });
     const labels = { in_sync: "동기화 완료", stale: "변경 사항 있음 · 동기화 필요", error: "동기화 실패" };
     $("#knowledge-es-status").textContent = `${labels[status.state] || status.state} · 계정 비공개 BM25 · ${status.indexed_chunks}개 청크`;
-  } catch (error) { $("#knowledge-es-status").textContent = error.message || "동기화하지 못했습니다. Elasticsearch 연결을 확인한 뒤 재시도하세요."; }
+    if (status.state === "in_sync") setKnowledgeEsFreshness(false);
+    else setKnowledgeEsFreshness(true, "동기화가 완료되지 않았습니다. Elasticsearch 개인 별칭은 아직 최신 상태가 아닙니다.");
+  } catch (error) {
+    $("#knowledge-es-status").textContent = error.message || "동기화하지 못했습니다. Elasticsearch 연결을 확인한 뒤 재시도하세요.";
+    setKnowledgeEsFreshness(true, "BM25 동기화에 성공하지 못했습니다. Elasticsearch 개인 별칭은 최신 상태로 확인되지 않았습니다.");
+  }
   finally { button.disabled = false; await loadKnowledgeEsStatus(); }
 }
 
@@ -964,6 +973,7 @@ async function loadKnowledgeList() {
   try {
     const result = await api("/api/knowledge/list", {});
     const documents = Array.isArray(result.documents) ? result.documents : [];
+    if (result.usage || result.limits) renderKnowledgeUsage(result.usage, result.limits);
     if (!documents.length) { status.textContent = "저장한 문서가 없습니다. 위에서 첫 문서를 추가해 보세요."; return; }
     status.textContent = `${documents.length}개 문서를 불러왔습니다.`;
     documents.forEach((documentInfo) => {
@@ -990,6 +1000,272 @@ function formatKnowledgeDate(value) {
 function formatKnowledgeBytes(value) {
   const bytes = Number(value);
   return Number.isFinite(bytes) ? `${bytes.toLocaleString()} B` : "크기 정보 없음";
+}
+
+function strictUtf8(bytes) {
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const step = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += step) binary += String.fromCharCode(...bytes.subarray(offset, offset + step));
+  return btoa(binary);
+}
+
+function formatKnowledgeUsage(usage = {}, limits = {}) {
+  const documents = usage.documents ?? usage.document_count ?? usage.documents_used ?? usage.local_documents ?? 0;
+  const bytes = usage.bytes ?? usage.content_bytes ?? usage.bytes_used ?? usage.stored_bytes ?? 0;
+  const documentLimit = limits.documents ?? limits.document_count ?? limits.max_documents ?? 100;
+  const byteLimit = limits.bytes ?? limits.content_bytes ?? limits.max_content_bytes ?? KNOWLEDGE_ACCOUNT_MAX_BYTES;
+  return `사용량 · 문서 ${Number(documents).toLocaleString()} / ${Number(documentLimit).toLocaleString()}개 · 내용 ${formatKnowledgeBytes(bytes)} / ${formatKnowledgeBytes(byteLimit)}`;
+}
+
+function renderKnowledgeUsage(usage, limits) {
+  if (!usage && !limits) return;
+  $("#knowledge-usage").textContent = formatKnowledgeUsage(usage || {}, limits || {});
+}
+
+async function refreshKnowledgeAfterMutation(message = "로컬 문서가 바뀌었습니다. Elasticsearch 개인 별칭은 성공적인 명시적 동기화 전까지 최신 상태가 아닙니다.") {
+  $("#knowledge-search-results")?.replaceChildren();
+  $("#knowledge-results").replaceChildren();
+  $("#knowledge-search-status").textContent = `${message} Elasticsearch 개인 별칭은 성공적인 명시적 동기화 전까지 최신 상태가 아닙니다.`;
+  setKnowledgeEsFreshness(true, "로컬 문서가 변경되었습니다. Elasticsearch 개인 별칭은 BM25 동기화가 성공할 때까지 최신 상태가 아닙니다.");
+  await Promise.all([loadKnowledgeList(), loadKnowledgeEsStatus()]);
+}
+
+function setKnowledgeEsFreshness(stale, message) {
+  const node = $("#knowledge-es-freshness");
+  if (!node) return;
+  node.classList.toggle("notice-error", stale);
+  node.classList.toggle("notice-muted", !stale);
+  node.textContent = message || (stale
+    ? "로컬 문서가 변경되었습니다. Elasticsearch 개인 별칭은 BM25 동기화가 성공할 때까지 최신 상태가 아닙니다."
+    : "BM25 동기화가 성공했습니다. Elasticsearch 개인 별칭에 현재 로컬 문서 변경 사항이 반영되었습니다.");
+}
+
+function importMappingFromControls() {
+  const importState = state.knowledgeImport;
+  if (!importState) return null;
+  if (importState.format === "txt" || importState.format === "md") return null;
+  return {
+    title: $("#knowledge-import-title-field").value,
+    content: $("#knowledge-import-content-field").value,
+    source: $("#knowledge-import-source-field").value,
+  };
+}
+
+function availableFieldNames(value) {
+  const fields = Array.isArray(value) ? value : [];
+  return fields.map((field) => typeof field === "string" ? field : String(field?.name || field?.field || "")).filter(Boolean);
+}
+
+function setImportFieldOptions(selector, fields, selected, optional = false) {
+  const select = $(selector);
+  select.replaceChildren();
+  if (optional) {
+    const empty = document.createElement("option"); empty.value = ""; empty.textContent = "선택 안 함"; select.append(empty);
+  }
+  fields.forEach((field) => { const option = document.createElement("option"); option.value = field; option.textContent = field; select.append(option); });
+  if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+  else if (!optional && fields.length) select.value = fields[0];
+}
+
+function renderKnowledgeImportPreview(result) {
+  const root = $("#knowledge-import-preview");
+  root.replaceChildren();
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  const records = Array.isArray(result.valid_records) ? result.valid_records : [];
+  if (Array.isArray(result.fields_available)) {
+    const fields = availableFieldNames(result.fields_available);
+    const mapping = $("#knowledge-import-mapping");
+    mapping.classList.toggle("hidden", !["csv", "jsonl"].includes(state.knowledgeImport?.format));
+    if (fields.length) {
+      const prior = importMappingFromControls() || {};
+      const choose = (names, preferences) => names.find((name) => preferences.includes(name.toLowerCase())) || names[0] || "";
+      setImportFieldOptions("#knowledge-import-title-field", fields, prior.title || choose(fields, ["title", "name", "subject", "headline"]));
+      setImportFieldOptions("#knowledge-import-content-field", fields, prior.content || choose(fields, ["content", "text", "body", "description"]));
+      setImportFieldOptions("#knowledge-import-source-field", fields, prior.source || choose(fields, ["source", "url", "source_label"]), true);
+    }
+  }
+  renderKnowledgeUsage(result.usage, result.limits);
+  if (result.format || result.file_sha256) {
+    const identity = document.createElement("p");
+    identity.className = "helper-text";
+    identity.textContent = `형식 ${String(result.format || state.knowledgeImport?.format || "확인 중")} · 파일 SHA256 ${String(result.file_sha256 || "미제공")}`;
+    root.append(identity);
+  }
+  errors.forEach((error) => {
+    const row = document.createElement("p"); row.className = "notice notice-error knowledge-row-error";
+    const rowNumber = error.row_number == null ? "파일" : `행 ${error.row_number}`;
+    row.textContent = `${rowNumber} · ${String(error.code || "invalid_row")} · ${String(error.message || "이 행을 읽지 못했습니다.")}`;
+    root.append(row);
+  });
+  records.forEach((record) => {
+    const card = document.createElement("article"); card.className = "knowledge-import-record";
+    const heading = document.createElement("strong"); heading.textContent = `행 ${Number(record.row_number)} · ${String(record.title || "제목 없음")}`;
+    const source = document.createElement("small"); source.textContent = `${String(record.source_label || state.knowledgeImport?.filename || "출처 없음")} · SHA256 ${String(record.content_sha256 || "미제공")}`;
+    const content = document.createElement("pre"); content.textContent = String(record.content || "");
+    card.append(heading, source, content);
+    if (record.duplicate) {
+      const duplicate = document.createElement("p"); duplicate.className = "notice notice-muted";
+      duplicate.textContent = `기존 문서 중복 · ID ${String(record.duplicate.document_id || "알 수 없음")} · revision ${String(record.duplicate.revision ?? "알 수 없음")}`;
+      const label = document.createElement("label"); label.className = "field-label"; label.textContent = "중복 처리 선택";
+      const select = document.createElement("select"); select.className = "text-input knowledge-duplicate-action"; select.dataset.rowNumber = String(record.row_number);
+      const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "건너뛰기 또는 교체 선택"; select.append(placeholder);
+      for (const [value, text] of [["skip", "기존 문서 유지 · 건너뛰기"], ["replace", "내용 교체"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; select.append(option); }
+      label.append(select); card.append(duplicate, label);
+    }
+    root.append(card);
+  });
+  if (result.needs_field_mapping) {
+    const mappingNotice = document.createElement("p"); mappingNotice.className = "notice notice-muted";
+    mappingNotice.textContent = "제목과 내용 열을 선택한 뒤 행 미리보기를 다시 실행하세요. 이 단계에서는 행을 검증하거나 저장하지 않았습니다.";
+    root.append(mappingNotice);
+  } else if (!records.length && !errors.length) root.textContent = "미리보기 결과가 비어 있습니다.";
+  state.knowledgeImport.preview = result;
+  updateKnowledgeImportCommitButton();
+}
+
+function updateKnowledgeImportCommitButton() {
+  const preview = state.knowledgeImport?.preview;
+  const duplicates = (preview?.valid_records || []).filter((record) => record.duplicate);
+  const actionsChosen = duplicates.every((record) => $(".knowledge-duplicate-action[data-row-number='" + String(Number(record.row_number)) + "']")?.value);
+  $("#knowledge-import-commit-button").disabled = !preview || preview.needs_field_mapping || !(preview.valid_records || []).length || !actionsChosen;
+}
+
+async function previewKnowledgeImport() {
+  const item = state.knowledgeImport;
+  if (!item) return;
+  const fields = importMappingFromControls();
+  if (!fields && !["txt", "md"].includes(item.format)) return;
+  $("#knowledge-import-preview-button").disabled = true;
+  $("#knowledge-import-commit-button").disabled = true;
+  $("#knowledge-import-status").textContent = "파일을 안전하게 파싱하고 행을 미리보는 중입니다. 아직 저장하지 않습니다.";
+  try {
+    const result = await api("/api/knowledge/import/preview", { filename: item.filename, content_base64: item.contentBase64, ...(fields ? { fields } : {}) });
+    item.fields = fields;
+    renderKnowledgeImportPreview(result);
+    $("#knowledge-import-status").textContent = result.needs_field_mapping
+      ? `열 ${availableFieldNames(result.fields_available).join(", ") || "없음"}을 찾았습니다. 제목과 내용 열을 고른 뒤 미리보기를 다시 실행하세요.`
+      : `${(result.valid_records || []).length}개 유효 행 · ${(result.errors || []).length}개 오류. 아직 저장하지 않았습니다. 중복은 각각 처리 방법을 선택하세요.`;
+  } catch (error) {
+    item.preview = null;
+    $("#knowledge-import-status").textContent = `미리보기 실패 · ${error.message || "파일, UTF-8 인코딩 또는 필드 선택을 확인하세요."}`;
+  } finally { $("#knowledge-import-preview-button").disabled = false; updateKnowledgeImportCommitButton(); }
+}
+
+function renderKnowledgeImportOutcomes(result) {
+  const root = $("#knowledge-import-preview");
+  const heading = document.createElement("h4"); heading.textContent = `저장 결과 · ${Array.isArray(result.outcomes) ? result.outcomes.length : 0}개 행`;
+  root.prepend(heading);
+  (result.outcomes || []).forEach((outcome) => {
+    const row = document.createElement("p"); row.className = `knowledge-import-outcome outcome-${String(outcome.outcome || "failed")}`;
+    row.textContent = `행 ${outcome.row_number ?? "?"} · ${String(outcome.outcome || "failed")} · ${String(outcome.message || outcome.document_id || "결과 정보 없음")}`;
+    root.append(row);
+  });
+  (result.errors || []).forEach((error) => {
+    const row = document.createElement("p"); row.className = "notice notice-error knowledge-row-error";
+    row.textContent = `${error.row_number == null ? "파일" : `행 ${error.row_number}`} · ${String(error.code || "import_error")} · ${String(error.message || "이 행을 저장하지 못했습니다.")}`;
+    root.append(row);
+  });
+  if (result.usage || result.limits) renderKnowledgeUsage(result.usage, result.limits);
+}
+
+async function commitKnowledgeImport() {
+  const item = state.knowledgeImport;
+  if (!item?.preview) return;
+  const duplicateActions = [...$$(".knowledge-duplicate-action")].map((select) => ({ row_number: Number(select.dataset.rowNumber), action: select.value }));
+  if (duplicateActions.some((action) => !["skip", "replace"].includes(action.action))) return;
+  const button = $("#knowledge-import-commit-button"); button.disabled = true;
+  $("#knowledge-import-status").textContent = "선택한 행을 계정의 개인 지식 보관함에 저장하고 있습니다.";
+  try {
+    const result = await api("/api/knowledge/import/commit", { filename: item.filename, content_base64: item.contentBase64, ...(item.fields ? { fields: item.fields } : {}), duplicate_actions: duplicateActions });
+    renderKnowledgeImportOutcomes(result);
+    const outcomes = result.outcomes || [];
+    const failed = outcomes.filter((entry) => entry.outcome === "failed").length + (result.errors || []).length;
+    $("#knowledge-import-status").textContent = result.partial || failed ? `부분 완료 · 실패 ${failed}개. 성공한 행은 보관되었으므로 아래 결과를 확인하세요.` : `가져오기 완료 · ${outcomes.length}개 행 처리됨.`;
+    await refreshKnowledgeAfterMutation();
+  } catch (error) {
+    $("#knowledge-import-status").textContent = `가져오기 실패 · ${error.message || "기존 문서는 변경되지 않았습니다."}`;
+  } finally { updateKnowledgeImportCommitButton(); }
+}
+
+function conflictList(result) {
+  const entries = result?.conflicts || result?.duplicates || [];
+  return Array.isArray(entries) ? entries : [];
+}
+
+function renderKnowledgeRestorePreview(result) {
+  const root = $("#knowledge-restore-preview"); root.replaceChildren();
+  const conflicts = conflictList(result);
+  const errors = result.errors || [];
+  renderKnowledgeUsage(result.usage || result.quota_impact, result.limits);
+  const summary = document.createElement("p"); summary.className = "helper-text";
+  summary.textContent = `Archive SHA256 ${String(result.archive_sha256 || "미제공")} · 충돌 ${conflicts.length}개 · 오류 ${errors.length}개 · quota ${JSON.stringify(result.quota_impact || {})}`;
+  root.append(summary);
+  errors.forEach((error) => { const row = document.createElement("p"); row.className = "notice notice-error"; row.textContent = `${error.row_number == null ? "백업" : `행 ${error.row_number}`} · ${String(error.code || "invalid_archive")} · ${String(error.message || "항목을 복원할 수 없습니다.")}`; root.append(row); });
+  conflicts.forEach((conflict) => {
+    const item = document.createElement("article"); item.className = "knowledge-import-record";
+    const title = document.createElement("strong"); title.textContent = `${String(conflict.title || "기존 문서 충돌")} · ID ${String(conflict.document_id || conflict.archive_document_id || "알 수 없음")}`;
+    const select = document.createElement("select"); select.className = "text-input knowledge-restore-action"; select.dataset.documentId = String(conflict.document_id || conflict.archive_document_id || "");
+    const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "복원 방식 선택"; select.append(placeholder);
+    for (const [value, text] of [["skip", "현재 문서 유지 · 건너뛰기"], ["replace", "백업 내용으로 교체"]]) { const option = document.createElement("option"); option.value = value; option.textContent = text; select.append(option); }
+    item.append(title, select); root.append(item);
+  });
+  state.knowledgeRestore.preview = result;
+  updateKnowledgeRestoreCommitButton();
+}
+
+function updateKnowledgeRestoreCommitButton() {
+  const restore = state.knowledgeRestore;
+  const conflicts = conflictList(restore?.preview);
+  const choices = $$(".knowledge-restore-action");
+  const chosen = conflicts.every((conflict) => choices.find((select) => select.dataset.documentId === String(conflict.document_id || conflict.archive_document_id || ""))?.value);
+  $("#knowledge-restore-commit-button").disabled = !restore?.preview?.archive_sha256 || Boolean(restore.preview.errors?.length) || !chosen;
+}
+
+async function previewKnowledgeRestore() {
+  const item = state.knowledgeRestore;
+  if (!item) return;
+  $("#knowledge-restore-preview-button").disabled = true;
+  $("#knowledge-restore-status").textContent = "백업 형식, 해시, 참조와 충돌을 확인하는 중입니다. 아직 복원하지 않습니다.";
+  try {
+    const result = await api("/api/knowledge/restore/preview", { archive: item.archive });
+    renderKnowledgeRestorePreview(result);
+    $("#knowledge-restore-status").textContent = "복원 미리보기를 확인하세요. 충돌이 있으면 각 항목의 방식을 선택해야 합니다.";
+  } catch (error) {
+    item.preview = null; $("#knowledge-restore-preview").replaceChildren();
+    $("#knowledge-restore-status").textContent = `복원 미리보기 실패 · ${error.message || "파일이 유효한 UTF-8 JSON 백업인지 확인하세요."}`;
+  } finally { $("#knowledge-restore-preview-button").disabled = false; updateKnowledgeRestoreCommitButton(); }
+}
+
+async function commitKnowledgeRestore() {
+  const item = state.knowledgeRestore;
+  if (!item?.preview?.archive_sha256) return;
+  const actions = [...$$(".knowledge-restore-action")].map((select) => ({ document_id: select.dataset.documentId, action: select.value }));
+  if (actions.some((choice) => !["skip", "replace"].includes(choice.action))) return;
+  const button = $("#knowledge-restore-commit-button"); button.disabled = true;
+  try {
+    const result = await api("/api/knowledge/restore/commit", { archive: item.archive, expected_sha256: item.preview.archive_sha256, actions });
+    $("#knowledge-restore-status").textContent = `복원 완료 · 문서 ${JSON.stringify(result.document_outcomes || result.documents || [])} · 평가 ${JSON.stringify(result.judgment_outcomes || result.judgments || [])}`;
+    renderKnowledgeUsage(result.usage, result.limits);
+    await refreshKnowledgeAfterMutation("백업을 복원했습니다. 검색 결과를 다시 불러오고 비공개 Elasticsearch 상태를 확인하세요.");
+  } catch (error) { $("#knowledge-restore-status").textContent = `복원 실패 · ${error.message || "미리보기를 다시 실행하고 충돌 선택을 확인하세요."}`; }
+  finally { updateKnowledgeRestoreCommitButton(); }
+}
+
+async function exportKnowledgeArchive() {
+  const button = $("#knowledge-export-button"); button.disabled = true;
+  try {
+    const archive = await api("/api/knowledge/export", {});
+    const blob = new Blob([JSON.stringify(archive, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a"); link.href = url; link.download = `private-knowledge-${new Date().toISOString().slice(0, 10)}.json`; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    $("#knowledge-import-status").textContent = `계정 전용 백업을 다운로드했습니다 · 문서 ${archive.documents?.length || 0}개 · 평가 ${archive.judgments?.length || 0}개.`;
+  } catch (error) { $("#knowledge-import-status").textContent = `내보내기 실패 · ${error.message || "로그인 상태를 확인하세요."}`; }
+  finally { button.disabled = false; }
 }
 
 function knowledgeAction(label, action, id, danger = false) {
@@ -1311,6 +1587,82 @@ function bindKnowledgeControls() {
   loadConcepts().catch((error) => {
     $("#knowledge-eval-status").textContent = `저장한 개념을 불러오지 못했습니다: ${error.message || "로그인 상태를 확인하세요."}`;
   });
+  $("#knowledge-import-file").addEventListener("change", async () => {
+    const file = $("#knowledge-import-file").files?.[0];
+    state.knowledgeImport = null;
+    $("#knowledge-import-preview").replaceChildren();
+    $("#knowledge-import-mapping").classList.add("hidden");
+    ["#knowledge-import-title-field", "#knowledge-import-content-field", "#knowledge-import-source-field"].forEach((selector) => $(selector).replaceChildren());
+    $("#knowledge-import-commit-button").disabled = true;
+    $("#knowledge-import-preview-button").disabled = true;
+    if (!file) return;
+    const format = /\.([^.]+)$/.exec(file.name)?.[1]?.toLowerCase() || "";
+    if (!["txt", "md", "csv", "jsonl"].includes(format)) {
+      $("#knowledge-import-status").textContent = "지원하지 않는 형식입니다. .txt, .md, .csv 또는 .jsonl 파일을 선택하세요.";
+      $("#knowledge-import-file").value = ""; return;
+    }
+    if (file.size > KNOWLEDGE_MAX_BYTES) {
+      $("#knowledge-import-status").textContent = "파일이 1 MiB를 넘습니다. 더 작은 UTF-8 파일을 선택하세요.";
+      $("#knowledge-import-file").value = ""; return;
+    }
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      strictUtf8(bytes);
+      const filename = file.name;
+      state.knowledgeImport = { filename, format, contentBase64: bytesToBase64(bytes), fields: null, preview: null };
+      $("#knowledge-import-mapping").classList.toggle("hidden", !["csv", "jsonl"].includes(format));
+      $("#knowledge-import-preview-button").disabled = false;
+      $("#knowledge-import-status").textContent = `${filename} · ${formatKnowledgeBytes(bytes.byteLength)} · UTF-8 확인 완료. 행 미리보기는 아직 저장하지 않습니다.`;
+      await previewKnowledgeImport();
+    } catch (error) {
+      state.knowledgeImport = null;
+      $("#knowledge-import-status").textContent = error instanceof TypeError ? "파일이 유효한 UTF-8이 아닙니다. UTF-8로 저장한 뒤 다시 선택하세요." : `파일을 읽지 못했습니다 · ${error.message || "다시 선택하세요."}`;
+      $("#knowledge-import-file").value = "";
+    }
+  });
+  $("#knowledge-import-preview-button").addEventListener("click", previewKnowledgeImport);
+  $("#knowledge-import-commit-button").addEventListener("click", commitKnowledgeImport);
+  $("#knowledge-import-preview").addEventListener("change", (event) => {
+    if (!event.target.matches(".knowledge-duplicate-action")) return;
+    updateKnowledgeImportCommitButton();
+  });
+  ["#knowledge-import-title-field", "#knowledge-import-content-field", "#knowledge-import-source-field"].forEach((selector) => $(selector).addEventListener("change", () => {
+    if (!state.knowledgeImport) return;
+    state.knowledgeImport.preview = null;
+    $("#knowledge-import-commit-button").disabled = true;
+    $("#knowledge-import-status").textContent = "필드 선택이 바뀌었습니다. 행 미리보기를 다시 실행하세요.";
+  }));
+  $("#knowledge-export-button").addEventListener("click", exportKnowledgeArchive);
+  $("#knowledge-restore-file").addEventListener("change", async () => {
+    const file = $("#knowledge-restore-file").files?.[0];
+    state.knowledgeRestore = null;
+    $("#knowledge-restore-preview").replaceChildren();
+    $("#knowledge-restore-preview-button").disabled = true;
+    $("#knowledge-restore-commit-button").disabled = true;
+    if (!file) return;
+    if (!/\.json$/i.test(file.name)) {
+      $("#knowledge-restore-status").textContent = "JSON 백업 파일(.json)을 선택하세요."; $("#knowledge-restore-file").value = ""; return;
+    }
+    if (file.size > KNOWLEDGE_RESTORE_MAX_BYTES) {
+      $("#knowledge-restore-status").textContent = "백업 파일이 128 MiB를 넘습니다. 서버의 안전한 복원 크기 제한을 초과합니다."; $("#knowledge-restore-file").value = ""; return;
+    }
+    try {
+      const text = strictUtf8(new Uint8Array(await file.arrayBuffer()));
+      const archive = JSON.parse(text);
+      if (!archive || typeof archive !== "object" || Array.isArray(archive)) throw new Error("백업은 JSON 객체여야 합니다.");
+      state.knowledgeRestore = { filename: file.name, archive, preview: null };
+      $("#knowledge-restore-preview-button").disabled = false;
+      $("#knowledge-restore-status").textContent = `${file.name} · ${formatKnowledgeBytes(file.size)} · UTF-8 JSON 확인 완료. 복원 전 미리보기를 실행하세요.`;
+    } catch (error) {
+      $("#knowledge-restore-status").textContent = `백업을 읽지 못했습니다 · ${error.message || "유효한 UTF-8 JSON 파일을 선택하세요."}`;
+      $("#knowledge-restore-file").value = "";
+    }
+  });
+  $("#knowledge-restore-preview-button").addEventListener("click", previewKnowledgeRestore);
+  $("#knowledge-restore-commit-button").addEventListener("click", commitKnowledgeRestore);
+  $("#knowledge-restore-preview").addEventListener("change", (event) => {
+    if (event.target.matches(".knowledge-restore-action")) updateKnowledgeRestoreCommitButton();
+  });
   $("#knowledge-content").addEventListener("input", updateKnowledgeEditor);
   ["#knowledge-title", "#knowledge-source"].forEach((selector) => $(selector).addEventListener("input", updateKnowledgeEditor));
   $("#knowledge-file").addEventListener("change", async () => {
@@ -1318,7 +1670,7 @@ function bindKnowledgeControls() {
     if (!/\.(txt|md)$/i.test(file.name)) { $("#knowledge-editor-status").textContent = ".txt 또는 .md 파일을 선택하세요."; $("#knowledge-file").value = ""; return; }
     if (file.size > KNOWLEDGE_MAX_BYTES) { $("#knowledge-editor-status").textContent = "파일이 1 MiB를 넘습니다. 더 작은 파일을 선택하세요."; $("#knowledge-file").value = ""; return; }
     try {
-      $("#knowledge-content").value = await file.text();
+      $("#knowledge-content").value = strictUtf8(new Uint8Array(await file.arrayBuffer()));
       if (!$("#knowledge-title").value.trim()) $("#knowledge-title").value = file.name.replace(/\.(txt|md)$/i, "");
       updateKnowledgeEditor(); $("#knowledge-editor-status").textContent = "파일 내용을 가져왔습니다. 제목과 내용을 확인한 뒤 미리보기를 선택하세요.";
     } catch { $("#knowledge-editor-status").textContent = "파일을 읽지 못했습니다. 텍스트 파일을 다시 선택하세요."; }
@@ -1344,7 +1696,7 @@ function bindKnowledgeControls() {
       const result = await api("/api/knowledge/save", payload);
       state.knowledgeDocumentId = result.document?.document_id || state.knowledgeDocumentId; state.knowledgePreviewKey = knowledgePreviewKey(fields);
       renderKnowledgeChunks(result.chunks || []); $("#knowledge-editor-status").textContent = "문서를 저장했습니다. 아래 청크는 서버가 저장한 결과입니다.";
-      updateKnowledgeEditor(); await loadKnowledgeList(); await loadKnowledgeEsStatus();
+      updateKnowledgeEditor(); await refreshKnowledgeAfterMutation("문서를 저장했습니다. 저장된 문서는 아래 목록에서 확인할 수 있습니다.");
     } catch { state.knowledgePreviewKey = null; $("#knowledge-editor-status").textContent = "문서를 저장하지 못했습니다. 내용을 확인한 뒤 다시 미리보고 저장하세요."; updateKnowledgeEditor(); }
   });
   $("#knowledge-new-button").addEventListener("click", resetKnowledgeEditor);
@@ -1359,7 +1711,7 @@ function bindKnowledgeControls() {
     else if (button.dataset.knowledgeAction === "delete") {
       if (!window.confirm("이 문서를 삭제할까요?")) return;
       button.disabled = true;
-      try { await api("/api/knowledge/delete", { document_id: id }); if (String(state.knowledgeDocumentId) === id) resetKnowledgeEditor(); await loadKnowledgeList(); await loadKnowledgeEsStatus(); }
+      try { await api("/api/knowledge/delete", { document_id: id }); if (String(state.knowledgeDocumentId) === id) resetKnowledgeEditor(); await refreshKnowledgeAfterMutation("문서를 삭제했습니다. 남은 문서는 목록에서 확인할 수 있습니다."); }
       catch { button.disabled = false; $("#knowledge-list-status").textContent = "문서를 삭제하지 못했습니다. 다시 시도하세요."; }
     }
   });

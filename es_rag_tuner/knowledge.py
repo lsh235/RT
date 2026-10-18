@@ -9,6 +9,9 @@ import re
 import sqlite3
 import threading
 import uuid
+import base64
+import csv
+import io
 from importlib.metadata import PackageNotFoundError, version as package_version
 from datetime import datetime, timezone
 from typing import Any
@@ -27,6 +30,10 @@ CHUNK_OVERLAP = 200
 MAX_TITLE_CODEPOINTS = 200
 MAX_SOURCE_CODEPOINTS = 200
 MAX_SEARCH_QUERY_CODEPOINTS = 1000
+MAX_IMPORT_ROWS = 100
+MAX_ARCHIVE_DOCUMENTS = MAX_DOCUMENTS
+ARCHIVE_FORMAT = "es-rag-knowledge"
+ARCHIVE_VERSION = 1
 DEFAULT_SEARCH_LIMIT = 10
 CONCEPT_PREVIEW_LIMIT = 20
 CONCEPT_RECIPE_VERSION = "knowledge-concept-fts-v1"
@@ -116,7 +123,9 @@ def _mark_es_stale(db: sqlite3.Connection) -> None:
 
 def _metadata(row: sqlite3.Row) -> dict[str, Any]:
     return {"document_id": row["id"], "title": row["title"], "source_label": row["source_label"],
-            "content_bytes": row["content_bytes"], "created_at": row["created_at"], "updated_at": row["updated_at"]}
+            "content_bytes": row["content_bytes"], "created_at": row["created_at"], "updated_at": row["updated_at"],
+            "source_name": row["source_name"], "source_record": row["source_record"],
+            "source_sha256": row["source_sha256"], "content_sha256": row["content_sha256"], "revision": row["revision"]}
 
 
 def _chunks(db: sqlite3.Connection, document_id: str) -> list[dict[str, Any]]:
@@ -128,7 +137,7 @@ def _chunks(db: sqlite3.Connection, document_id: str) -> list[dict[str, Any]]:
 def list_documents() -> dict[str, Any]:
     with concepts._connect_db() as db:
         _schema(db)
-        rows = db.execute("SELECT id,title,source_label,content_bytes,created_at,updated_at FROM knowledge_documents ORDER BY updated_at DESC,id").fetchall()
+        rows = db.execute("SELECT id,title,source_label,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents ORDER BY updated_at DESC,id").fetchall()
         return {"documents": [_metadata(row) for row in rows]}
 
 
@@ -136,7 +145,7 @@ def get_document(payload: dict[str, Any]) -> dict[str, Any]:
     document_id = _text(payload.get("document_id"), "document_id", 64)
     with concepts._connect_db() as db:
         _schema(db)
-        row = db.execute("SELECT id,title,source_label,content,content_bytes,created_at,updated_at FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
+        row = db.execute("SELECT id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
         if not row:
             raise KnowledgeError("Knowledge document not found", 404)
         return {**_metadata(row), "content": row["content"], "chunks": _chunks(db, document_id)}
@@ -156,7 +165,7 @@ def save_document(payload: dict[str, Any]) -> dict[str, Any]:
         db.execute("BEGIN IMMEDIATE")
         current = None
         if document_id:
-            current = db.execute("SELECT id,created_at FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
+            current = db.execute("SELECT id,created_at,title,source_label,content,content_sha256,revision FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
             if not current:
                 raise KnowledgeError("Knowledge document not found", 404)
         usage = db.execute("SELECT COALESCE(SUM(content_bytes),0) AS bytes,COUNT(*) AS documents FROM knowledge_documents").fetchone()
@@ -166,12 +175,14 @@ def save_document(payload: dict[str, Any]) -> dict[str, Any]:
         if not current and usage["documents"] >= MAX_DOCUMENTS:
             raise KnowledgeError("account knowledge storage is limited to 100 documents", 413)
         if current:
-            db.execute("UPDATE knowledge_documents SET title=?,source_label=?,content=?,content_bytes=?,updated_at=? WHERE id=?", (title, source, content, size, now, document_id))
+            changed = (current["title"], current["source_label"], current["content"]) != (title, source, content)
+            revision = int(current["revision"]) + (1 if changed else 0)
+            db.execute("UPDATE knowledge_documents SET title=?,source_label=?,content=?,content_bytes=?,content_sha256=?,revision=?,updated_at=? WHERE id=?", (title, source, content, size, hashlib.sha256(content.encode("utf-8")).hexdigest(), revision, now, document_id))
             db.execute("DELETE FROM knowledge_fts WHERE document_id=?", (document_id,))
             db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (document_id,))
         else:
             document_id = str(uuid.uuid4())
-            db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", (document_id, title, source, content, size, now, now))
+            db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,1)", (document_id, title, source, content, size, now, now, hashlib.sha256(content.encode("utf-8")).hexdigest()))
         chunk_rows = []
         for chunk in new_chunks:
             chunk_id = str(uuid.uuid4())
@@ -179,7 +190,7 @@ def save_document(payload: dict[str, Any]) -> dict[str, Any]:
             db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], title, source, document_id, chunk_id))
             chunk_rows.append({"id": chunk_id, "ordinal": chunk["ordinal"], "start": chunk["start"], "end": chunk["end"], "content": chunk["content"]})
         _mark_es_stale(db)
-        row = db.execute("SELECT id,title,source_label,content_bytes,created_at,updated_at FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
+        row = db.execute("SELECT id,title,source_label,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
         return {"document": _metadata(row), "chunks": chunk_rows}
 
 
@@ -195,6 +206,472 @@ def delete_document(payload: dict[str, Any]) -> dict[str, Any]:
         db.execute("DELETE FROM knowledge_documents WHERE id=?", (document_id,))
         _mark_es_stale(db)
         return {"deleted": True, "document_id": document_id}
+
+
+def _usage(db: sqlite3.Connection) -> dict[str, int]:
+    row = db.execute("SELECT COUNT(*) AS documents,COALESCE(SUM(content_bytes),0) AS bytes FROM knowledge_documents").fetchone()
+    return {"documents": int(row["documents"]), "bytes": int(row["bytes"])}
+
+
+def _import_error(code: str, message: str, row_number: int | None = None) -> dict[str, Any]:
+    result: dict[str, Any] = {"code": code, "message": message}
+    if row_number is not None:
+        result["row_number"] = row_number
+    return result
+
+
+def _import_input(payload: dict[str, Any]) -> tuple[str, bytes, dict[str, str], str, list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    filename = payload.get("filename")
+    if not isinstance(filename, str) or not filename.strip() or len(filename) > 255 or any(ch in filename for ch in ("/", "\\", "\x00")) or filename in {".", ".."}:
+        raise KnowledgeError("filename must be a short file name without path separators")
+    filename = filename.strip()
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    formats = {"txt": "txt", "md": "md", "csv": "csv", "jsonl": "jsonl"}
+    if suffix not in formats:
+        raise KnowledgeError("supported import formats are .txt, .md, .csv, and .jsonl")
+    encoded = payload.get("content_base64")
+    if not isinstance(encoded, str) or len(encoded) > ((MAX_DOCUMENT_BYTES + 2) // 3) * 4 + 8:
+        raise KnowledgeError("import file exceeds the 1 MiB limit or is invalid")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, base64.binascii.Error):
+        raise KnowledgeError("content_base64 must contain valid Base64 data") from None
+    if len(raw) > MAX_DOCUMENT_BYTES:
+        raise KnowledgeError("import file exceeds the 1 MiB limit")
+    file_hash = hashlib.sha256(raw).hexdigest()
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        raise KnowledgeError("import file must use valid UTF-8 encoding") from None
+    fields = payload.get("fields", {})
+    if not isinstance(fields, dict) or set(fields) - {"title", "content", "source"}:
+        raise KnowledgeError("fields must map title, content, and optional source")
+    needs_mapping = suffix in {"csv", "jsonl"} and (not isinstance(fields.get("title"), str) or not fields["title"] or not isinstance(fields.get("content"), str) or not fields["content"])
+    if suffix in {"csv", "jsonl"} and ("source" in fields and not isinstance(fields["source"], str)):
+        raise KnowledgeError("source field mapping must be a string")
+    stem = filename.rsplit(".", 1)[0]
+    records: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    available: list[str] = []
+    if suffix in {"txt", "md"}:
+        available = ["title", "content", "source"]
+        records = [{"row_number": 1, "title": stem, "content": text, "source_label": filename}]
+    elif suffix == "csv":
+        try:
+            reader = csv.DictReader(io.StringIO(text, newline=""), strict=True)
+            available = list(reader.fieldnames or [])
+            if not available or len(available) > 200 or len(set(available)) != len(available) or any(not name for name in available):
+                raise csv.Error("invalid header")
+            for row_number, row in enumerate(reader, 2):
+                if row_number > MAX_IMPORT_ROWS + 1:
+                    raise KnowledgeError("import files are limited to 100 data rows")
+                if None in row or any(value is None for value in row.values()):
+                    errors.append(_import_error("INVALID_CSV_ROW", "Row has a different number of fields.", row_number))
+                    continue
+                if not needs_mapping:
+                    records.append({"row_number": row_number, "title": row.get(fields["title"], ""), "content": row.get(fields["content"], ""), "source_label": row.get(fields.get("source", ""), "") if fields.get("source") else ""})
+        except csv.Error:
+            raise KnowledgeError("CSV header or quoting is malformed") from None
+    else:
+        available = []
+        for row_number, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            if row_number > MAX_IMPORT_ROWS:
+                raise KnowledgeError("import files are limited to 100 data rows")
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                errors.append(_import_error("INVALID_JSONL_ROW", "Row is not valid JSON.", row_number))
+                continue
+            if not isinstance(row, dict):
+                errors.append(_import_error("INVALID_JSONL_ROW", "Each JSONL row must be an object.", row_number))
+                continue
+            available = sorted(set(available) | {str(key) for key in row})
+            if len(available) > 200:
+                raise KnowledgeError("JSONL files are limited to 200 distinct field names")
+            if not needs_mapping:
+                records.append({"row_number": row_number, "title": row.get(fields["title"], ""), "content": row.get(fields["content"], ""), "source_label": row.get(fields.get("source", ""), "") if fields.get("source") else ""})
+    normalized: list[dict[str, Any]] = []
+    for record in records:
+        row_number = int(record["row_number"])
+        title, content, source = record["title"], record["content"], record["source_label"]
+        if not isinstance(title, str) or not isinstance(content, str) or not isinstance(source, str):
+            errors.append(_import_error("INVALID_FIELD", "Mapped title, content, and source values must be text.", row_number))
+            continue
+        title, source = title.strip(), (source.strip() or filename)
+        if not title or not content.strip():
+            errors.append(_import_error("EMPTY_RECORD", "Mapped title and content must not be empty.", row_number))
+            continue
+        if len(title) > MAX_TITLE_CODEPOINTS or len(source) > MAX_SOURCE_CODEPOINTS:
+            errors.append(_import_error("FIELD_TOO_LONG", "Mapped title or source exceeds its character limit.", row_number))
+            continue
+        size = len(content.encode("utf-8"))
+        if size > MAX_DOCUMENT_BYTES:
+            errors.append(_import_error("DOCUMENT_TOO_LARGE", "Document exceeds the 1 MiB limit.", row_number))
+            continue
+        normalized.append({"row_number": row_number, "title": title, "content": content, "source_label": source,
+                           "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(), "content_bytes": size})
+    return filename, raw, fields, file_hash, normalized, errors, available
+
+
+def _annotate_duplicates(db: sqlite3.Connection, records: list[dict[str, Any]], filename: str) -> list[dict[str, Any]]:
+    result = []
+    seen: dict[str, int] = {}
+    for record in records:
+        item = dict(record)
+        digest = item["content_sha256"]
+        row = db.execute("SELECT id,revision FROM knowledge_documents WHERE content_sha256=? OR (source_name=? AND source_record=?) ORDER BY CASE WHEN source_name=? AND source_record=? THEN 0 ELSE 1 END,id LIMIT 1", (digest, filename, str(item["row_number"]), filename, str(item["row_number"]))).fetchone()
+        if row:
+            item["duplicate"] = {"document_id": row["id"], "revision": int(row["revision"])}
+        elif digest in seen:
+            item["duplicate"] = {"document_id": None, "revision": None, "row_number": seen[digest]}
+        else:
+            seen[digest] = int(item["row_number"])
+        result.append(item)
+    return result
+
+
+def import_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    filename, _raw, fields, file_hash, records, errors, available = _import_input(payload)
+    with concepts._connect_db() as db:
+        _schema(db)
+        records = _annotate_duplicates(db, records, filename)
+        usage = _usage(db)
+    needs_mapping = filename.rsplit(".", 1)[-1].lower() in {"csv", "jsonl"} and (not fields.get("title") or not fields.get("content"))
+    return {"file_sha256": file_hash, "format": filename.rsplit(".", 1)[-1].lower(), "fields_available": available,
+            "valid_records": records, "errors": errors, "usage": usage,
+            "limits": {"documents": MAX_DOCUMENTS, "bytes": MAX_ACCOUNT_BYTES, "account_bytes": MAX_ACCOUNT_BYTES, "document_bytes": MAX_DOCUMENT_BYTES, "rows": MAX_IMPORT_ROWS},
+            "needs_field_mapping": bool(needs_mapping)}
+
+
+def _private_state_summary(db: sqlite3.Connection) -> dict[str, Any]:
+    state = db.execute("SELECT state,generation,indexed_chunks,vector_state,vector_chunks FROM knowledge_es_state WHERE id=1").fetchone()
+    return dict(state) if state else {"state": "stale", "generation": 0, "indexed_chunks": 0, "vector_state": "not_indexed", "vector_chunks": 0}
+
+
+def import_commit(payload: dict[str, Any]) -> dict[str, Any]:
+    filename, _raw, fields, file_hash, records, errors, _available = _import_input(payload)
+    if filename.rsplit(".", 1)[-1].lower() in {"csv", "jsonl"} and (not fields.get("title") or not fields.get("content")):
+        raise KnowledgeError("CSV and JSONL imports require title and content field mappings")
+    actions = payload.get("duplicate_actions", [])
+    if not isinstance(actions, list):
+        raise KnowledgeError("duplicate_actions must be an array")
+    action_by_row: dict[int, str] = {}
+    for item in actions:
+        if not isinstance(item, dict) or isinstance(item.get("row_number"), bool) or not isinstance(item.get("row_number"), int) or item.get("action") not in {"skip", "replace"} or item["row_number"] in action_by_row:
+            raise KnowledgeError("duplicate_actions contains an invalid or repeated choice")
+        action_by_row[item["row_number"]] = item["action"]
+    outcomes: list[dict[str, Any]] = []
+    with concepts._connect_db() as db:
+        _schema(db)
+        db.execute("BEGIN IMMEDIATE")
+        duplicate_rows: set[int] = set()
+        preview_seen: set[str] = set()
+        for record in records:
+            row_number = int(record["row_number"])
+            existing = db.execute("SELECT 1 FROM knowledge_documents WHERE content_sha256=? OR (source_name=? AND source_record=?) LIMIT 1", (record["content_sha256"], filename, str(row_number))).fetchone()
+            if existing or record["content_sha256"] in preview_seen:
+                duplicate_rows.add(row_number)
+            preview_seen.add(record["content_sha256"])
+        valid_rows = {int(record["row_number"]) for record in records}
+        if set(action_by_row) - valid_rows or set(action_by_row) != duplicate_rows:
+            raise KnowledgeError("duplicate_actions must provide exactly one explicit choice for each duplicate row")
+        seen_hashes: dict[str, str] = {}
+        any_change = False
+        for record in records:
+            row_number = record["row_number"]
+            duplicate = db.execute("SELECT id,title,source_label,content,content_bytes,created_at,revision,source_name,source_record,source_sha256 FROM knowledge_documents WHERE content_sha256=? OR (source_name=? AND source_record=?) ORDER BY CASE WHEN source_name=? AND source_record=? THEN 0 ELSE 1 END,id LIMIT 1", (record["content_sha256"], filename, str(row_number), filename, str(row_number))).fetchone()
+            duplicate_id = duplicate["id"] if duplicate else seen_hashes.get(record["content_sha256"])
+            if duplicate_id:
+                action = action_by_row.get(row_number)
+                if action not in {"skip", "replace"}:
+                    raise KnowledgeError("Every duplicate row requires an explicit skip or replace choice")
+                if action == "skip":
+                    outcomes.append({"row_number": row_number, "outcome": "skipped", "document_id": duplicate_id})
+                    continue
+                if duplicate is None:
+                    duplicate = db.execute("SELECT id,title,source_label,content,content_bytes,created_at,revision,source_name,source_record,source_sha256 FROM knowledge_documents WHERE id=?", (duplicate_id,)).fetchone()
+            else:
+                action = None
+            now = _now()
+            chunk_rows = _split(record["content"])
+            if duplicate:
+                current_tuple = (duplicate["title"], duplicate["source_label"], duplicate["content"], duplicate["source_name"], duplicate["source_record"], duplicate["source_sha256"])
+                next_tuple = (record["title"], record["source_label"], record["content"], filename, str(row_number), file_hash)
+                if current_tuple == next_tuple:
+                    outcomes.append({"row_number": row_number, "outcome": "unchanged", "document_id": duplicate_id, "revision": int(duplicate["revision"])})
+                    seen_hashes[record["content_sha256"]] = duplicate_id
+                    continue
+                usage = _usage(db)
+                if usage["bytes"] - int(duplicate["content_bytes"]) + record["content_bytes"] > MAX_ACCOUNT_BYTES:
+                    errors.append(_import_error("ACCOUNT_QUOTA_EXCEEDED", "Account storage would exceed the 20 MiB limit.", row_number))
+                    outcomes.append({"row_number": row_number, "outcome": "failed", "document_id": duplicate_id, "code": "ACCOUNT_QUOTA_EXCEEDED"})
+                    continue
+                changed = current_tuple != next_tuple
+                revision = int(duplicate["revision"]) + (1 if changed else 0)
+                db.execute("UPDATE knowledge_documents SET title=?,source_label=?,content=?,content_bytes=?,updated_at=?,source_name=?,source_record=?,source_sha256=?,content_sha256=?,revision=? WHERE id=?", (record["title"], record["source_label"], record["content"], record["content_bytes"], now, filename, str(row_number), file_hash, record["content_sha256"], revision, duplicate_id))
+                db.execute("DELETE FROM knowledge_fts WHERE document_id=?", (duplicate_id,))
+                db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (duplicate_id,))
+                outcome = "replaced"
+            else:
+                usage = _usage(db)
+                if usage["documents"] >= MAX_DOCUMENTS or usage["bytes"] + record["content_bytes"] > MAX_ACCOUNT_BYTES:
+                    code = "DOCUMENT_LIMIT" if usage["documents"] >= MAX_DOCUMENTS else "ACCOUNT_QUOTA_EXCEEDED"
+                    errors.append(_import_error(code, "Account knowledge storage limit would be exceeded.", row_number))
+                    outcomes.append({"row_number": row_number, "outcome": "failed", "code": code})
+                    continue
+                duplicate_id = str(uuid.uuid4())
+                revision = 1
+                db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)", (duplicate_id, record["title"], record["source_label"], record["content"], record["content_bytes"], now, now, filename, str(row_number), file_hash, record["content_sha256"]))
+                outcome = "created"
+            for chunk in chunk_rows:
+                chunk_id = str(uuid.uuid4())
+                db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES(?,?,?,?,?,?)", (chunk_id, duplicate_id, chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"]))
+                db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], record["title"], record["source_label"], duplicate_id, chunk_id))
+            outcomes.append({"row_number": row_number, "outcome": outcome, "document_id": duplicate_id, "revision": revision})
+            seen_hashes[record["content_sha256"]] = duplicate_id
+            any_change = True
+        if any_change:
+            _mark_es_stale(db)
+        usage = _usage(db)
+        state = _private_state_summary(db)
+    partial = bool(errors) or any(item["outcome"] == "failed" for item in outcomes)
+    return {"file_sha256": file_hash, "outcomes": outcomes, "errors": errors, "partial": partial, "usage": usage,
+            "limits": {"documents": MAX_DOCUMENTS, "bytes": MAX_ACCOUNT_BYTES, "account_bytes": MAX_ACCOUNT_BYTES, "document_bytes": MAX_DOCUMENT_BYTES},
+            "private_es_state": state}
+
+
+def export_archive(_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    with concepts._connect_db() as db:
+        _schema(db)
+        documents = [dict(row) for row in db.execute("SELECT id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents ORDER BY id")]
+        judgments = [dict(row) for row in db.execute("SELECT j.concept_id,j.query_id,j.document_id,j.query_fingerprint,j.document_fingerprint,j.source_label,j.rating,j.updated_at FROM knowledge_judgments j JOIN knowledge_documents d ON d.id=j.document_id ORDER BY j.concept_id,j.query_id,j.document_id")]
+    return {"format": ARCHIVE_FORMAT, "version": ARCHIVE_VERSION, "created_at": _now(), "documents": documents, "judgments": judgments}
+
+
+def _archive_value(payload: dict[str, Any]) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
+    archive = payload.get("archive")
+    if not isinstance(archive, dict) or set(archive) != {"format", "version", "created_at", "documents", "judgments"}:
+        raise KnowledgeError("archive has an invalid structure")
+    if archive.get("format") != ARCHIVE_FORMAT or isinstance(archive.get("version"), bool) or archive.get("version") != ARCHIVE_VERSION or not isinstance(archive.get("created_at"), str):
+        raise KnowledgeError("archive format or version is not supported")
+    documents, judgments = archive.get("documents"), archive.get("judgments")
+    if not isinstance(documents, list) or not isinstance(judgments, list) or len(documents) > MAX_ARCHIVE_DOCUMENTS or len(judgments) > MAX_ARCHIVE_DOCUMENTS * 100:
+        raise KnowledgeError("archive exceeds document or judgment limits")
+    archive_hash = _hash(archive)
+    errors: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    total_bytes = 0
+    normalized_docs: list[dict[str, Any]] = []
+    for position, raw in enumerate(documents, 1):
+        if not isinstance(raw, dict):
+            errors.append(_import_error("INVALID_ARCHIVE_DOCUMENT", "Document entry must be an object.", position))
+            continue
+        try:
+            if set(raw) != {"id", "title", "source_label", "content", "content_bytes", "created_at", "updated_at", "source_name", "source_record", "source_sha256", "content_sha256", "revision"}:
+                raise ValueError
+            document_id = _text(raw.get("id"), "document id", 64)
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", document_id) or document_id in seen_ids:
+                raise ValueError
+            title = _text(raw.get("title"), "title", MAX_TITLE_CODEPOINTS)
+            source = _text(raw.get("source_label", ""), "source_label", MAX_SOURCE_CODEPOINTS, required=False)
+            content, size = _content_bytes(raw.get("content"))
+            content_bytes = raw.get("content_bytes")
+            if isinstance(content_bytes, bool) or not isinstance(content_bytes, int) or content_bytes != size or raw.get("content_sha256") != hashlib.sha256(content.encode("utf-8")).hexdigest():
+                raise ValueError
+            source_name = raw.get("source_name", "")
+            source_record = raw.get("source_record", "")
+            source_sha = raw.get("source_sha256", "")
+            if not isinstance(source_name, str) or len(source_name) > 255 or any(ch in source_name for ch in ("/", "\\", "\x00")) or not isinstance(source_record, str) or (source_record and not re.fullmatch(r"\d{1,8}", source_record)) or not isinstance(source_sha, str) or (source_sha and not re.fullmatch(r"[0-9a-f]{64}", source_sha)):
+                raise ValueError
+            revision = raw.get("revision")
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+                raise ValueError
+            created_at, updated_at = raw.get("created_at"), raw.get("updated_at")
+            if not isinstance(created_at, str) or not isinstance(updated_at, str) or len(created_at) > 64 or len(updated_at) > 64:
+                raise ValueError
+            normalized_docs.append({"id": document_id, "title": title, "source_label": source, "content": content, "content_bytes": size,
+                                    "created_at": created_at, "updated_at": updated_at, "source_name": source_name,
+                                    "source_record": source_record, "source_sha256": source_sha,
+                                    "content_sha256": raw["content_sha256"], "revision": revision})
+            total_bytes += size
+            seen_ids.add(document_id)
+        except (KnowledgeError, KeyError, ValueError, TypeError):
+            errors.append(_import_error("INVALID_ARCHIVE_DOCUMENT", "Document entry failed validation.", position))
+    if total_bytes > MAX_ACCOUNT_BYTES:
+        errors.append(_import_error("ARCHIVE_QUOTA_EXCEEDED", "Archive content exceeds the 20 MiB account limit."))
+    if len(seen_ids) != len(documents):
+        # Row errors above are sufficient; avoid accepting a partial untrusted archive.
+        pass
+    normalized_judgments: list[dict[str, Any]] = []
+    seen_judgments: set[tuple[str, str, str]] = set()
+    for position, raw in enumerate(judgments, 1):
+        try:
+            if not isinstance(raw, dict) or set(raw) != {"concept_id", "query_id", "document_id", "query_fingerprint", "document_fingerprint", "source_label", "rating", "updated_at"}:
+                raise ValueError
+            concept_id = _text(raw["concept_id"], "concept_id", 128)
+            query_id = _text(raw["query_id"], "query_id", 128)
+            document_id = _text(raw["document_id"], "document_id", 64)
+            if document_id not in seen_ids or any(not isinstance(raw[key], str) or not re.fullmatch(r"[0-9a-f]{64}", raw[key]) for key in ("query_fingerprint", "document_fingerprint")):
+                raise ValueError
+            source = _text(raw["source_label"], "source_label", MAX_SOURCE_CODEPOINTS, required=False)
+            rating = raw["rating"]
+            if rating is not None and (isinstance(rating, bool) or not isinstance(rating, int) or not 0 <= rating <= 3):
+                raise ValueError
+            if not isinstance(raw["updated_at"], str) or len(raw["updated_at"]) > 64:
+                raise ValueError
+            key = (concept_id, query_id, document_id)
+            if key in seen_judgments:
+                raise ValueError
+            seen_judgments.add(key)
+            normalized_judgments.append({**raw, "concept_id": concept_id, "query_id": query_id, "document_id": document_id, "source_label": source})
+        except (KnowledgeError, KeyError, ValueError, TypeError):
+            errors.append(_import_error("INVALID_ARCHIVE_JUDGMENT", "Judgment entry failed validation.", position))
+    if errors:
+        return {"archive": archive, "archive_sha256": archive_hash, "documents": normalized_docs, "judgments": normalized_judgments, "errors": errors}, archive_hash, errors
+    return {"archive": archive, "archive_sha256": archive_hash, "documents": normalized_docs, "judgments": normalized_judgments, "errors": []}, archive_hash, []
+
+
+def _archive_reference_errors(db: sqlite3.Connection, prepared: dict[str, Any]) -> list[dict[str, Any]]:
+    saved_context: dict[tuple[str, str], str] = {}
+    for row in db.execute("SELECT body FROM concepts"):
+        try:
+            concept = concepts.validate_concept(json.loads(row[0]))
+            for query in concept["queries"]:
+                saved_context[(concept["id"], query["id"])] = concepts._query_judgment_fingerprint(query)
+        except Exception:
+            continue
+    documents = {doc["id"]: doc for doc in prepared["documents"]}
+    errors: list[dict[str, Any]] = []
+    for position, judgment in enumerate(prepared["judgments"], 1):
+        expected_query = saved_context.get((judgment["concept_id"], judgment["query_id"]))
+        document = documents.get(judgment["document_id"])
+        if expected_query is None:
+            errors.append(_import_error("MISSING_JUDGMENT_REFERENCE", "Judgment references an unavailable saved query.", position))
+        elif expected_query != judgment["query_fingerprint"]:
+            errors.append(_import_error("STALE_JUDGMENT_REFERENCE", "Judgment does not match the current saved query.", position))
+        if document is not None and _hash({"title": document["title"], "source_label": document["source_label"], "content": document["content"]}) != judgment["document_fingerprint"]:
+            errors.append(_import_error("STALE_JUDGMENT_DOCUMENT", "Judgment does not match the archived document.", position))
+    return errors
+
+
+def restore_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    prepared, archive_hash, errors = _archive_value(payload)
+    with concepts._connect_db() as db:
+        _schema(db)
+        errors.extend(_archive_reference_errors(db, prepared))
+        current = {str(row[0]): row for row in db.execute("SELECT id,content_bytes,revision FROM knowledge_documents")}
+        conflicts = [{"document_id": item["id"], "title": item["title"], "revision": int(current[item["id"]]["revision"]), "archive_revision": item["revision"]}
+                     for item in prepared["documents"] if item["id"] in current]
+        adds = [item for item in prepared["documents"] if item["id"] not in current]
+        current_usage = _usage(db)
+        projected = {"documents": current_usage["documents"] + len(adds),
+                     "bytes": current_usage["bytes"] - sum(int(current[item["id"]]["content_bytes"]) for item in prepared["documents"] if item["id"] in current) + sum(item["content_bytes"] for item in prepared["documents"])}
+    quota_impact = {"usage": projected, "limits": {"documents": MAX_DOCUMENTS, "bytes": MAX_ACCOUNT_BYTES},
+                    "exceeds": projected["documents"] > MAX_DOCUMENTS or projected["bytes"] > MAX_ACCOUNT_BYTES}
+    return {"archive_sha256": archive_hash, "errors": errors, "conflicts": conflicts, "quota": quota_impact,
+            "quota_impact": quota_impact, "usage": projected, "limits": quota_impact["limits"]}
+
+
+def restore_commit(payload: dict[str, Any]) -> dict[str, Any]:
+    prepared, archive_hash, errors = _archive_value(payload)
+    if errors:
+        raise KnowledgeError("archive failed validation; no data was restored")
+    if payload.get("expected_sha256") != archive_hash:
+        raise KnowledgeError("archive changed after preview; preview it again")
+    actions = payload.get("actions", [])
+    if not isinstance(actions, list):
+        raise KnowledgeError("actions must be an array")
+    action_by_id: dict[str, str] = {}
+    for item in actions:
+        if not isinstance(item, dict) or not isinstance(item.get("document_id"), str) or item.get("action") not in {"skip", "replace"} or item["document_id"] in action_by_id:
+            raise KnowledgeError("actions contains an invalid or repeated choice")
+        action_by_id[item["document_id"]] = item["action"]
+    docs_out: list[dict[str, Any]] = []
+    judgments_out: list[dict[str, Any]] = []
+    with concepts._connect_db() as db:
+        _schema(db)
+        db.execute("BEGIN IMMEDIATE")
+        db_conflicts = {row[0] for row in db.execute("SELECT id FROM knowledge_documents")}
+        doc_archive_ids = {doc["id"] for doc in prepared["documents"]}
+        if set(action_by_id) - (db_conflicts & doc_archive_ids):
+            raise KnowledgeError("actions contains a document that is not a restore conflict")
+        saved_context: dict[tuple[str, str], str] = {}
+        for row in db.execute("SELECT body FROM concepts"):
+            try:
+                concept = concepts.validate_concept(json.loads(row[0]))
+                for query in concept["queries"]:
+                    saved_context[(concept["id"], query["id"])] = concepts._query_judgment_fingerprint(query)
+            except Exception:
+                continue
+        archive_documents = {doc["id"]: doc for doc in prepared["documents"]}
+        for judgment in prepared["judgments"]:
+            query_fingerprint = saved_context.get((judgment["concept_id"], judgment["query_id"]))
+            document = archive_documents[judgment["document_id"]]
+            document_fingerprint = _hash({"title": document["title"], "source_label": document["source_label"], "content": document["content"]})
+            if query_fingerprint is None:
+                raise KnowledgeError("archive contains a judgment for an unavailable saved query")
+            if query_fingerprint != judgment["query_fingerprint"] or document_fingerprint != judgment["document_fingerprint"]:
+                raise KnowledgeError("archive judgment references changed after preview")
+        for doc in prepared["documents"]:
+            existing = db.execute("SELECT id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents WHERE id=?", (doc["id"],)).fetchone()
+            if existing and action_by_id.get(doc["id"]) not in {"skip", "replace"}:
+                raise KnowledgeError("Every restore conflict requires an explicit skip or replace choice")
+            if existing and action_by_id[doc["id"]] == "skip":
+                docs_out.append({"document_id": doc["id"], "outcome": "skipped"})
+                continue
+            usage = _usage(db)
+            if existing:
+                new_count, new_bytes = usage["documents"], usage["bytes"] - int(existing["content_bytes"]) + doc["content_bytes"]
+                existing_state = tuple(existing[key] for key in (
+                    "title", "source_label", "content", "created_at", "updated_at",
+                    "source_name", "source_record", "source_sha256", "content_sha256",
+                ))
+                archive_state = tuple(doc[key] for key in (
+                    "title", "source_label", "content", "created_at", "updated_at",
+                    "source_name", "source_record", "source_sha256", "content_sha256",
+                ))
+                revision = int(existing["revision"]) + (1 if existing_state != archive_state else 0)
+                outcome = "replaced"
+            else:
+                new_count, new_bytes = usage["documents"] + 1, usage["bytes"] + doc["content_bytes"]
+                revision = doc["revision"]
+                outcome = "created"
+            if new_count > MAX_DOCUMENTS or new_bytes > MAX_ACCOUNT_BYTES:
+                raise KnowledgeError("restore would exceed this account's storage limits")
+            if existing:
+                db.execute("UPDATE knowledge_documents SET title=?,source_label=?,content=?,content_bytes=?,created_at=?,updated_at=?,source_name=?,source_record=?,source_sha256=?,content_sha256=?,revision=? WHERE id=?", (doc["title"], doc["source_label"], doc["content"], doc["content_bytes"], doc["created_at"], doc["updated_at"], doc["source_name"], doc["source_record"], doc["source_sha256"], doc["content_sha256"], revision, doc["id"]))
+                db.execute("DELETE FROM knowledge_fts WHERE document_id=?", (doc["id"],))
+                db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (doc["id"],))
+            else:
+                db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (doc["id"], doc["title"], doc["source_label"], doc["content"], doc["content_bytes"], doc["created_at"], doc["updated_at"], doc["source_name"], doc["source_record"], doc["source_sha256"], doc["content_sha256"], revision))
+            for chunk in _split(doc["content"]):
+                chunk_id = str(uuid.uuid4())
+                db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES(?,?,?,?,?,?)", (chunk_id, doc["id"], chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"]))
+                db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], doc["title"], doc["source_label"], doc["id"], chunk_id))
+            docs_out.append({"document_id": doc["id"], "outcome": outcome, "revision": revision})
+        applied_docs = {item["document_id"] for item in docs_out if item["outcome"] != "skipped"}
+        for document_id in applied_docs:
+            db.execute("DELETE FROM knowledge_judgments WHERE document_id=?", (document_id,))
+        for judgment in prepared["judgments"]:
+            if judgment["document_id"] not in applied_docs:
+                judgments_out.append({"document_id": judgment["document_id"], "concept_id": judgment["concept_id"], "query_id": judgment["query_id"], "outcome": "skipped"})
+                continue
+            expected_query_fp = saved_context[(judgment["concept_id"], judgment["query_id"])]
+            if judgment["query_fingerprint"] != expected_query_fp:
+                raise KnowledgeError("archive judgment does not match the current saved query")
+            db.execute("INSERT INTO knowledge_judgments(concept_id,query_id,document_id,query_fingerprint,document_fingerprint,source_label,rating,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(concept_id,query_id,document_id) DO UPDATE SET query_fingerprint=excluded.query_fingerprint,document_fingerprint=excluded.document_fingerprint,source_label=excluded.source_label,rating=excluded.rating,updated_at=excluded.updated_at", (judgment["concept_id"], judgment["query_id"], judgment["document_id"], judgment["query_fingerprint"], judgment["document_fingerprint"], judgment["source_label"], judgment["rating"], judgment["updated_at"]))
+            judgments_out.append({"document_id": judgment["document_id"], "concept_id": judgment["concept_id"], "query_id": judgment["query_id"], "outcome": "restored"})
+        changed = any(item["outcome"] != "skipped" for item in docs_out)
+        if changed:
+            _mark_es_stale(db)
+        usage, state = _usage(db), _private_state_summary(db)
+    partial = any(item["outcome"] == "skipped" for item in docs_out)
+    limits = {"documents": MAX_DOCUMENTS, "bytes": MAX_ACCOUNT_BYTES}
+    return {"archive_sha256": archive_hash, "documents": docs_out, "judgments": judgments_out,
+            "document_outcomes": docs_out, "judgment_outcomes": judgments_out, "partial": partial,
+            "usage": usage, "limits": limits, "private_es_state": state}
 
 
 def _owner_alias() -> str:

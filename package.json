@@ -1,10 +1,10 @@
 {
   "name": "es-rag-tuning-workbench",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Browser smoke tooling for the local Elasticsearch RAG workbench",
   "scripts": {
-    "test:browser": "node scripts/browser_smoke.mjs && node tests/cycle44_positive_target_misses_browser.js && node tests/r03_first_use_browser.js"
+    "test:browser": "node scripts/browser_smoke.mjs && node tests/cycle44_positive_target_misses_browser.js && node tests/r03_first_use_browser.js && node tests/r04_import_browser.js"
   },
   "devDependencies": {
     "playwright": "^1.55.0"

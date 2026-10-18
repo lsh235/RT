@@ -7,6 +7,7 @@ import socket
 import sqlite3
 import tempfile
 import threading
+import traceback
 import unittest
 import urllib.error
 import urllib.request
@@ -260,10 +261,15 @@ class Cycle38KnowledgeAcceptance(unittest.TestCase):
                     knowledge.list_documents()
                     knowledge.save_document({"title": f"parallel {index}", "source_label": "parallel", "content": f"uniqueparallel{index}"})
             except Exception as exc:
-                errors.append(type(exc).__name__ + ": " + str(exc))
+                errors.append(type(exc).__name__ + ": " + str(exc) + "\n" + traceback.format_exc())
         user_db = auth.state_database_path(owner)
         if user_db.exists():
             user_db.unlink()
+        # This acceptance fixture deliberately recreates the same DB path on
+        # repeated runs. Remove its disposable SQLite sidecars as well so a
+        # prior WAL session cannot be mistaken for a fresh first-open race.
+        for suffix in ("-wal", "-shm", "-journal"):
+            user_db.with_name(user_db.name + suffix).unlink(missing_ok=True)
         with ExitStack() as _:
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
             for thread in threads: thread.start()
