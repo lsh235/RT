@@ -1,0 +1,52 @@
+# Cycle 42 private knowledge acceptance
+
+## Scope and evidence boundary
+
+This acceptance targets account-local SQLite knowledge synchronized into an owner-specific Elasticsearch alias and immutable generation. The QA fixture uses disposable local SQLite state and a fake HTTP Elasticsearch endpoint. Passing results establish application behavior against the fake protocol boundary only; they do not establish compatibility with a live Elasticsearch distribution, production credentials, cluster settings, refresh timing under load, or provider/runtime delivery.
+
+Runtime model identity: **UNVERIFIED**. The requested implementation model was gpt-6-luna; the runtime does not expose a model identity that QA can independently verify.
+
+## Acceptance gates
+
+| Gate | Evidence expected |
+| --- | --- |
+| Authenticated owner identity | `GET /api/knowledge/es-status` and `POST /api/knowledge/es-sync` use the authenticated account. Forged owner/account/index payload values do not redirect the generated alias or generation. |
+| Isolation before Elasticsearch | Foreign private alias/generation paths, URL-encoded forms, prefixes, comma lists, wildcards, `_all`, and indexless searches are denied before a request reaches fake ES. Generic vectorize/import/info/mapping routes cannot target private generations; ordinary query text may contain the reserved prefix. Index inventory omits foreign private names. |
+| Sync lifecycle | First sync selects an owner-specific generation; local save/update/delete makes status stale; a later successful sync returns to `in_sync`. Refresh and a visibility check happen before alias publication. Overlapping same-account syncs are rejected or safely serialized without generation collision. |
+| Failure handling | Bulk item failure, alias-swap failure, and unexpected/future/multi-target existing aliases are rejected; the old alias target remains selected; retry can publish a new generation after the alias is restored to a valid owned target. A local edit during staging or private search cannot publish/return stale results. Private content canaries do not appear in sync errors, status, or captured logs. |
+| Search lanes | Shared-index results and private knowledge results remain separate lanes; raw BM25 scores from separate corpora are not compared or merged. Private retrieval is lexical BM25 only; vector and hybrid private retrieval are explicitly unsupported. |
+| Shared retrieval regression | Existing shared Elasticsearch retrieval remains available with the same requested index and mode behavior, including when private status verification fails. Owners receive their own private BM25 hits and no other account's marker. |
+| First-use empty library | With zero local documents/chunks and no prior generation, status and BM25 search report that there are no private documents yet; they do not request a sync or query a private generation. Existing shared hits remain visible. |
+| UI smoke | Sync status/retry control, separate Shared/My private lanes, private-only results with an empty shared lane, stale-result withholding/retry guidance, and vector/hybrid limitation text are checked with mocked APIs. |
+
+## Research basis
+
+Official documentation accessed 2026-10-18 supports these practical boundaries; it does not prove this application's implementation or acceptance results.
+
+- Elasticsearch document and field level security evaluates access using Elasticsearch users and roles. It cannot infer which local application account is associated with a request when all application users share one Elasticsearch identity. [Document and field level security](https://www.elastic.co/docs/deploy-manage/users-roles/cluster-or-deployment-auth/controlling-access-at-document-field-level), [Roles](https://www.elastic.co/docs/deploy-manage/users-roles/cluster-or-deployment-auth/user-roles), [Security privileges](https://www.elastic.co/docs/reference/elasticsearch/security-privileges)
+- Search shard routing is a search optimization/filtering parameter, not an authorization boundary. It cannot enforce the application account relationship by itself. [Search shard routing](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/search-shard-routing)
+- Aliases provide an indirection over one or more indices and can be updated through alias actions. The application must validate the caller's authority before using an alias or concrete generation path. [Aliases](https://www.elastic.co/docs/manage-data/data-store/aliases)
+- SQLite transactions provide atomicity for local database changes. They do not create a distributed transaction with Elasticsearch, so local SQLite updates and ES publication need explicit stale/error state and recovery handling. [SQLite transactional guarantees](https://www.sqlite.org/transactional.html)
+- Elasticsearch indexing visibility depends on refresh behavior; acknowledging an index operation does not alone prove immediate search visibility. The fake endpoint does not emulate real refresh timing. [Refresh parameter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter)
+- Bulk requests can return per-item failures in the response even when the HTTP request itself succeeds. The application must inspect item results, surface partial failure, and support retry. [Bulk API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-bulk)
+- Index API operations address a concrete index and document ID; generation publication and alias movement are application workflow decisions layered over those operations. [Index API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-index-2)
+
+## Commands and results
+
+Environment: Linux, Python 3.10.14 from `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python`; each test fixture uses temporary SQLite files and an ephemeral loopback HTTP server that emulates the Elasticsearch endpoints used by the application. No live Elasticsearch/provider was contacted.
+
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m unittest discover -s tests -p 'test_cycle42_private_knowledge_acceptance.py' -v` — **PASS**, 16 tests, 0 failures. Includes first-use empty-library state, shared-lane preservation/no private-generation query, and sync rejection/preservation/retry with unexpected future and multi-target aliases.
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m unittest discover -s tests -p 'test_knowledge.py' -v` — **PASS**, 9 tests, 0 failures.
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m unittest discover -s tests -p 'test_knowledge_evaluation.py' -v` — **PASS**, 14 tests, 0 failures.
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m unittest discover -s tests -p 'test_cycle37_auth_acceptance.py' -v` — **PASS**, 17 tests, 0 failures.
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m compileall -q es_rag_tuner` — **PASS**, exit 0, no diagnostics.
+- `/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python -m pip wheel --no-deps --no-build-isolation . --wheel-dir /tmp/cycle42-wheel` — **PASS**, built `es_rag_tuning_workbench-1.3.0-py3-none-any.whl` (236,749 bytes; SHA256 `b7a00b86ce7164cf1f8be93608069bc7b9dfb9193cd02cc3c58fc11859fb4cf7`). The wheel is outside the repository; generated `es_rag_tuning_workbench.egg-info` was removed after the build.
+- `NODE_PATH=/tmp/cycle42-playwright/node_modules CYCLE42_CHROMIUM_EXECUTABLE=/usr/bin/google-chrome PYTHON=/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python node tests/cycle42_private_knowledge_browser.js` — **PASS**, mocked API UI smoke; first-use empty state, two sync attempts (first failure, then retry success), BM25, vector, and hybrid lanes checked.
+- `NODE_PATH=/tmp/cycle42-playwright/node_modules CYCLE38_CHROMIUM_EXECUTABLE=/usr/bin/google-chrome PYTHON=/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python node tests/cycle38_knowledge_browser.js` — **PASS**, mocked knowledge CRUD UI; 27 API calls.
+- `NODE_PATH=/tmp/cycle42-playwright/node_modules CYCLE39_CHROMIUM_EXECUTABLE=/usr/bin/google-chrome PYTHON=/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python node tests/cycle39_knowledge_browser.js` — **PASS**, mocked local evaluation UI; 15 API calls.
+- `NODE_PATH=/tmp/cycle42-playwright/node_modules CYCLE37_CHROMIUM_EXECUTABLE=/usr/bin/google-chrome PYTHON=/home/sra235/.pyenv/versions/3.10.14/envs/unsloth-env/bin/python node tests/cycle37_auth_browser.js` — **PASS**, mocked account/auth browser flow; 28 API calls.
+- `node --check es_rag_tuner/web/app.js && node --check tests/cycle38_knowledge_browser.js && node --check tests/cycle39_knowledge_browser.js && node --check tests/cycle37_auth_browser.js && node --check tests/cycle42_private_knowledge_browser.js && git diff --check` — **PASS**, no syntax or whitespace diagnostics after the latest implementation changes.
+
+The focused tests cover authenticated account-derived alias identity despite forged payload values; denied foreign alias/generation paths before any fake ES request in shared search, document, explain, diagnostic, and AI retrieval paths; filtered private index inventory; stale/in-sync and initial-empty status through CRUD and sync; Bulk partial failure, alias-swap failure, and unsafe existing alias sets preserving the selected alias; retry after valid alias restoration; refresh/visibility ordering; staging and search race protection; overlapping syncs; canary redaction; alias target validation; own-account positive retrieval isolation; shared/private lane separation; explicit private vector/hybrid limitations; and common-boundary rejection of URL-encoded aliases, private prefixes, comma lists, wildcards, `_all`, and indexless search paths. Shared vector/hybrid retrieval is injected as a deterministic shared-lane result for that assertion, while the private mode response is exercised through the API.
+
+NOT RUN: live Elasticsearch compatibility, real cluster alias atomicity/refresh behavior, external provider delivery, production credentials, large-scale load/soak, and durable production database behavior. Browser checks use a real local Chrome process but mock every API request; they are UI behavior evidence only. The `.venv/bin/python` available in this checkout lacks `argon2`; tests ran with the Python 3.10.14 environment above, which has the declared dependency. Playwright was installed under `/tmp/cycle42-playwright` and did not modify repository dependency files.

@@ -1,0 +1,9 @@
+.venv/
+.cache/
+build/
+dist/
+*.egg-info/
+data/sources/grpc/
+__pycache__/
+*.py[cod]
+.pytest_cache/

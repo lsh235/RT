@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10221f">
+  <title>ES RAG Tuning Workbench</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ES RAG Tuning Workbench home">
+      <span class="brand-mark">ES</span>
+      <span><strong>Retrieval Workbench</strong><small>Elasticsearch · RAG quality lab</small></span>
+    </a>
+    <div class="top-meta"><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.0.0</span></div>
+  </header>
+
+  <main id="auth-screen" class="auth-screen" aria-labelledby="auth-title">
+    <section class="auth-card">
+      <p class="eyebrow">LOCAL ACCOUNT</p><h1 id="auth-title">워크벤치 로그인</h1>
+      <p id="auth-message" class="auth-message" role="status" aria-live="polite">세션을 확인하고 있습니다.</p>
+      <form id="login-form" class="auth-form hidden">
+        <label class="field-label" for="login-username">사용자 이름</label><input id="login-username" class="text-input" autocomplete="username" required>
+        <label class="field-label" for="login-password">비밀번호</label><input id="login-password" class="text-input" type="password" autocomplete="current-password" required>
+        <button class="button button-primary full-width" type="submit">로그인</button>
+      </form>
+      <p id="bootstrap-guidance" class="notice notice-muted hidden">관리자 계정이 아직 없습니다. 서버 컴퓨터의 터미널에서 CLI bootstrap 명령으로 첫 관리자를 만든 뒤 다시 로그인하세요. 웹에서는 최초 계정을 만들 수 없습니다.</p>
+    </section>
+  </main>
+
+  <div class="layout hidden" id="workbench-layout">
+    <aside class="sidebar">
+      <section class="side-section">
+        <div class="section-heading"><span class="step">01</span><div><h2>Elasticsearch 연결</h2><p>연결 정보는 저장하지 않습니다.</p></div></div>
+        <label class="field-label" for="es-url">Endpoint</label>
+        <input id="es-url" class="text-input" type="url" value="http://127.0.0.1:9200" autocomplete="url">
+        <label class="field-label" for="auth-type">인증 방식</label>
+        <select id="auth-type" class="text-input">
+          <option value="none">인증 없음</option>
+          <option value="basic">Basic Auth</option>
+          <option value="api_key">API Key</option>
+        </select>
+        <div id="basic-fields" class="auth-fields hidden">
+          <label class="field-label" for="es-user">사용자 이름</label>
+          <input id="es-user" class="text-input" type="text" autocomplete="username">
+          <label class="field-label" for="es-password">비밀번호</label>
+          <input id="es-password" class="text-input" type="password" autocomplete="current-password">
+        </div>
+        <div id="api-key-fields" class="auth-fields hidden">
+          <label class="field-label" for="es-api-key">인코딩된 API Key</label>
+          <input id="es-api-key" class="text-input" type="password" autocomplete="off" placeholder="ID:API key Base64 값">
+        </div>
+        <label class="field-label" for="index-name">검색 인덱스</label>
+        <div class="input-combo"><input id="index-name" class="text-input" value="jira-grpc-issues" spellcheck="false" list="index-options"><datalist id="index-options"></datalist><button id="refresh-indices" class="icon-button" title="인덱스 목록 새로고침" aria-label="인덱스 목록 새로고침">↻</button></div>
+        <button id="connect-button" class="button button-primary full-width"><span class="button-icon">↗</span> 연결 확인</button>
+        <div id="connection-status" class="connection-status idle"><span class="status-dot"></span><span>연결 전</span></div>
+        <div id="cluster-summary" class="cluster-summary hidden"></div>
+      </section>
+
+      <section class="side-section sample-section">
+        <details class="sample-maintenance">
+        <summary>샘플 인덱스 관리 <span>선택 사항 · 제공된 gRPC 평가 데이터</span></summary>
+        <div class="section-heading"><span class="step">02</span><div><h2>샘플 인덱스</h2><p>제공된 gRPC 이슈 평가 데이터</p></div></div>
+        <div class="dataset-stats">
+          <div><strong id="sample-document-count">25</strong><span>문서</span></div>
+          <div><strong>10</strong><span>평가 질의</span></div>
+          <div><strong id="embedding-count">0</strong><span>임베딩</span></div>
+        </div>
+        <div id="embedding-status" class="notice notice-muted" tabindex="-1">연결 후 벡터 매핑과 로컬 임베딩 모델 상태를 확인합니다.</div>
+        <button id="vectorize-button" class="button button-secondary full-width" disabled>임베딩 모델 다운로드 및 생성</button>
+        <button id="load-sample-button" class="button button-secondary full-width" disabled>샘플 인덱스 생성 및 적재</button>
+        <div id="sample-status" class="sample-status">먼저 Elasticsearch에 연결하세요.</div>
+        </details>
+      </section>
+
+      <section class="side-footnote">
+        <span class="footnote-icon">i</span>
+        <p>이 앱은 브라우저와 서버를 loopback에만 열고, Elasticsearch 인증정보를 디스크에 기록하지 않습니다. 원격 endpoint는 HTTPS를 사용하세요.</p>
+      </section>
+    </aside>
+
+    <main class="main-content">
+      <section id="account-tools" class="account-tools card hidden" aria-labelledby="account-tools-title">
+        <div class="account-tools-heading"><div><h2 id="account-tools-title">계정 관리</h2><p id="current-identity-copy"></p></div><button id="toggle-password-form" class="button button-secondary button-small" type="button">비밀번호 변경</button></div>
+        <form id="password-form" class="account-form hidden"><label class="field-label" for="current-password">현재 비밀번호</label><input id="current-password" type="password" class="text-input" autocomplete="current-password" required><label class="field-label" for="new-password">새 비밀번호 (최소 15자)</label><input id="new-password" type="password" class="text-input" autocomplete="new-password" minlength="15" required><p class="helper-text">새 비밀번호는 15자 이상이어야 합니다.</p><button class="button button-primary" type="submit">비밀번호 변경</button><p id="password-status" role="status" aria-live="polite"></p></form>
+        <section id="admin-account-tools" class="hidden" aria-labelledby="admin-account-title"><h3 id="admin-account-title">관리자 계정</h3><form id="create-account-form" class="account-create-form"><label class="field-label" for="new-username">사용자 이름<input id="new-username" class="text-input" autocomplete="off" required></label><label class="field-label" for="new-display-name">표시 이름<input id="new-display-name" class="text-input" autocomplete="off" required></label><label class="field-label" for="new-account-password">임시 비밀번호 (최소 15자)<input id="new-account-password" type="password" class="text-input" autocomplete="new-password" minlength="15" required></label><button class="button button-secondary" type="submit">계정 만들기</button></form><p id="admin-status" role="status" aria-live="polite"></p><div id="account-list" class="account-list" aria-live="polite"></div></section>
+      </section>
+      <div class="workspace-heading">
+        <div><div class="eyebrow">RETRIEVAL QUALITY</div><h1>개념과 문서를 연결해 검색 결과를 확인하고 조정하세요.</h1><p>같은 쿼리와 정답셋으로 설정을 비교해 검색 품질을 반복 개선합니다.</p></div>
+        <div class="target-badge"><span class="target-label">기존 샘플 평가 목표</span><details><summary>목표 보기</summary><strong>Recall@5 ≥ 0.90</strong><strong>MRR@5 ≥ 0.80</strong><small>샘플 데이터용 기준입니다.</small></details></div>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="워크벤치 메뉴">
+        <button class="tab active" role="tab" aria-selected="true" data-tab="concept-panel"><span>◎</span> 개념 실험</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="search-panel"><span>⌕</span> 검색 실험</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="evaluation-panel"><span>▦</span> 평가 및 튜닝</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="document-panel"><span>▤</span> 문서 · 청크 랩</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="knowledge-panel"><span>▣</span> 내 지식</button>
+      </nav>
+      <p id="ai-result-stage-status" class="ai-context-announcement" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <section id="concept-panel" class="tab-panel active" role="tabpanel">
+        <div class="panel-intro"><div><h2>검색 결과 함께 다듬기</h2><p>찾고 싶은 내용을 적고, 결과를 살펴본 뒤 도움이 되는 문서를 알려주세요.</p></div><div class="panel-badges"><span class="label-chip">기존 인덱스 읽기 전용</span><span id="concept-index-badge" class="index-badge">jira-grpc-issues</span></div></div>
+        <section class="guided-start card" aria-labelledby="guided-start-title">
+          <div class="guided-start-head"><div><span class="step">1</span><div><h3 id="guided-start-title">문서와 검색할 필드 확인</h3><p>연결한 인덱스에서 제목과 본문으로 쓸 필드를 추천합니다. 문서는 읽기만 합니다.</p></div></div><button id="quickstart-fields" class="button button-secondary">필드와 예시 문서 확인</button></div>
+          <div id="schema-status" class="notice notice-muted">Elasticsearch 연결 후 필드 추천과 예시 문서를 불러오세요.</div>
+          <div id="sample-onboarding" class="sample-onboarding hidden" role="status" aria-live="polite">
+            <div><strong>바로 체험할 수 있어요</strong><p id="sample-onboarding-copy"></p></div>
+            <button id="sample-onboarding-open" type="button" class="button button-secondary">샘플 적재 설정 열기</button>
+          </div>
+          <div id="quickstart-preview" class="quickstart-preview" aria-live="polite"><p class="muted">먼저 왼쪽에서 Elasticsearch 연결을 확인하세요. 인덱스가 선택되어 있으면 바로 필드를 살펴볼 수 있습니다.</p></div>
+        </section>
+        <div class="concept-toolbar card"><div><strong>저장한 개념</strong><p>이 브라우저 세션에서 Elasticsearch 연결을 확인한 뒤 사용할 수 있습니다.</p></div><div class="concept-toolbar-actions"><select id="saved-concepts" aria-label="저장한 개념"><option value="">개념 선택</option></select><button id="load-concept" class="button button-secondary button-small">불러오기</button><button id="new-concept" class="button button-secondary button-small">새 개념</button></div></div>
+        <div id="concept-editor" class="concept-editor card">
+          <div class="concept-section-heading"><div><span class="step">2</span><div><h3>찾고 싶은 내용</h3><p>상황을 평소 쓰는 말로 설명하세요. 먼저 결과를 보고 이름과 설명은 나중에 다듬어도 됩니다.</p></div></div><div class="concept-save-actions"><button id="fill-concept-example" class="button button-secondary button-small">예시 보기</button><button id="save-concept" class="button button-secondary">개념 저장</button></div></div>
+          <div class="guided-query"><label class="field-label" for="guided-query-text">어떤 내용을 찾고 싶나요?</label><textarea id="guided-query-text" rows="2" placeholder="예: 요청이 시간 초과된 뒤 다시 시도해 복구한 사례"></textarea><button id="guided-first-preview" class="button button-primary" disabled>이 내용으로 결과 보기</button><p class="helper-text">첫 질문은 설정 조정에 사용합니다. 다른 질문은 조정에 쓰지 않고 결과가 유지되는지 따로 확인할 수 있습니다.</p><p class="helper-text">개념 검색은 선택한 필드에서 표현을 찾습니다. 벡터·혼합 검색은 ‘검색 실험’ 탭에서 계속 사용할 수 있습니다.</p></div>
+          <details class="advanced-section"><summary>개념 이름과 뜻 다듬기 <span>선택 사항</span></summary><div class="concept-form-grid"><label class="field-label">개념 이름<input id="concept-name" class="text-input" maxlength="120" placeholder="예: 연결 시간 초과 후 복구"></label><label class="field-label">설명<input id="concept-description" class="text-input" maxlength="500" placeholder="이 개념이 찾으려는 상황"></label></div>
+          <div class="concept-form-grid advanced-inline"><label class="field-label">다른 표현<input id="concept-aliases" class="text-input" placeholder="쉼표로 구분 · 예: timeout retry, 요청 재시도"></label><label class="field-label">제외할 표현<input id="concept-exclusions" class="text-input" placeholder="쉼표로 구분 · 예: 연결 설정 가이드"></label></div></details>
+          <details class="advanced-section"><summary>함께 볼 표현과 필드별 설정 <span>선택 사항</span></summary>
+          <div class="concept-section-heading related-heading"><div><span class="step">고급</span><div><h3>함께 볼 표현</h3><p>뜻이 가까운 표현을 추가하고 검색 반영 정도를 조정합니다.</p></div></div><button id="add-related-term" class="button button-secondary button-small">표현 추가</button></div>
+          <div id="related-terms" class="related-terms"></div>
+          <div class="concept-section-heading mapping-heading"><div><span class="step">필드</span><div><h3>필드 선택 바꾸기</h3><p>추천한 필드가 맞지 않거나 필터를 쓰려면 조정하세요.</p></div></div><button id="refresh-schema" class="button button-secondary button-small" disabled>다시 불러오기</button></div>
+          <div class="concept-form-grid mapping-grid"><label class="field-label">문서 제목 필드<select id="concept-title-field" class="text-input" disabled><option value="">필드 선택</option></select></label><fieldset class="field-choice"><legend>검색할 본문 필드</legend><div id="concept-text-fields" class="field-check-list"><span class="muted">필드 목록을 불러오세요.</span></div></fieldset><fieldset class="field-choice"><legend>필터에 사용할 필드</legend><div id="concept-filter-fields" class="field-check-list"><span class="muted">선택 사항</span></div></fieldset></div>
+          <div class="concept-settings"><div class="concept-setting-intro"><strong>검색 반영 정도와 결과 수</strong><small>기본값을 조정해 개념 표현과 본문 필드의 반영 정도를 바꿉니다.</small></div><div class="concept-setting-controls"><label>개념 반영<input id="concept-weight" class="text-input" type="number" min="0.1" max="10" step="0.1" value="1"></label><label>함께 볼 표현 반영<input id="related-weight" class="text-input" type="number" min="0.1" max="10" step="0.1" value="1"></label><label>표시할 문서<input id="concept-size" class="text-input" type="number" min="1" max="50" step="1" value="10"></label><label>비교할 후보<input id="concept-candidate-size" class="text-input" type="number" min="10" max="100" step="5" value="50"></label></div><div id="concept-field-boosts" class="concept-field-boosts"></div></div>
+          <div class="concept-filter-editor"><div><strong>검색 조건</strong><small>저장한 질의 비교와 설정 조정에 함께 적용합니다.</small></div><div id="concept-filter-rows"></div><button id="add-concept-filter" type="button" class="button button-secondary button-small">조건 추가</button></div>
+          </details>
+          <details class="advanced-section saved-queries-section"><summary>평가 질의와 정보 요구 묶음 관리 <span>질의 표현과 묶음 이름</span></summary><div class="concept-section-heading queries-heading"><div><span class="step">3</span><div><h3>평가 질의와 정보 요구 묶음</h3><p>평가 질의는 실제 검색에 쓰는 문장입니다. 같은 정보 요구 묶음 이름을 반복하면 여러 문장 표현을 함께 셉니다. 이름이 비어 있으면 각 질의는 별도 묶음입니다.</p></div></div><button id="add-concept-query" class="button button-secondary button-small">질의 추가</button></div><p class="helper-text information-need-suggestions-help">같은 사용 방식의 기존 묶음 이름을 입력할 때 제안을 볼 수 있습니다. 재사용은 선택 사항이며, 빈칸으로 두거나 새 이름을 자유롭게 입력해도 됩니다.</p><div id="concept-queries" class="concept-queries"></div></details>
+          <div class="concept-query-run"><label class="field-label" for="concept-query-select">평가할 질의</label><select id="concept-query-select" class="text-input"><option value="">직접 입력</option></select><button id="information-need-preview" class="button button-secondary" disabled>같은 정보 요구의 질의 함께 미리보기</button><p class="helper-text">각 질의를 별도로 검색하고, 성공한 질의마다 독립된 미리보기 기록을 저장합니다. 문서 평가도 선택한 질의 ID별로 따로 유지됩니다.</p><label class="field-label" for="concept-query">검색어</label><div class="search-row"><textarea id="concept-query" rows="2" placeholder="개념으로 찾고 싶은 질문이나 표현을 입력하세요."></textarea><button id="concept-preview" class="button button-primary" disabled>결과 비교</button></div><p class="helper-text">질의를 선택하면 문서 평가가 저장됩니다.</p></div>
+        </div>
+        <section id="ai-coach" class="ai-coach card" aria-labelledby="ai-coach-title">
+          <div class="coach-heading"><div><span class="step">선택</span><div><h3 id="ai-coach-title">AI에게 초안이나 결과 해석 요청</h3><p>사용할 수 있는 구독에 로그인되어 있으면 초안을 제안합니다. 결과 확인과 저장은 직접 선택합니다.</p></div></div><button id="ai-refresh-status" class="button button-secondary button-small">연결 상태 새로고침</button></div>
+          <div class="coach-provider-row"><label class="field-label" for="ai-provider">사용할 구독</label><select id="ai-provider" class="text-input"><option value="codex">Codex 구독</option><option value="copilot">GitHub Copilot (SDK)</option></select><label class="field-label hidden" id="ai-model-wrap" for="ai-model">모델</label><select id="ai-model" class="text-input hidden"><option value="">기본 모델 사용</option></select><span id="ai-provider-status" class="provider-status" aria-live="polite">연결 상태 확인 중</span></div>
+          <div id="ai-setup-hint" class="notice notice-muted">AI 기능은 선택 사항입니다. 로그인할 수 없더라도 직접 개념을 만들고 검색 결과를 평가할 수 있습니다.</div>
+          <div id="ai-staged-context" class="ai-context-readout" aria-label="보낼 예정인 검색 결과 문맥"></div>
+          <div id="ai-retry-context" class="ai-context-readout" aria-live="polite" aria-label="다시 시도할 요청의 문맥"></div>
+          <div id="ai-chat-history" class="ai-chat-history" aria-live="polite"><p class="muted">예: “요청 시간 초과 후 복구한 사례를 찾고 싶어요. 현재 결과에서 빠진 이유도 확인해 주세요.”</p></div>
+          <label class="field-label" for="ai-message">AI에게 부탁할 내용</label><textarea id="ai-message" rows="2" placeholder="초안 만들기, 검색 결과 설명, 문서가 빠진 이유 확인"></textarea>
+          <div class="coach-actions"><button id="ai-send" data-ai-send-action type="button" class="button button-primary" disabled>요청 보내기</button><button id="ai-retry" class="button button-secondary" disabled>다시 시도</button><button id="ai-cancel" class="button button-secondary" disabled>요청 취소</button><button id="ai-reset" class="button button-secondary" disabled>대화 지우기</button><span id="ai-job-status" class="helper-text" aria-live="polite"></span></div>
+          <div id="ai-draft-review" class="ai-draft-review"></div>
+          <p class="helper-text">AI의 응답은 검색 결과에 대한 모델 해석입니다. 문서의 관련성이나 답변 품질을 증명하지 않으므로 직접 확인하세요. AI는 선택한 인덱스에서 허용된 문서만 읽습니다. 저장, 평가, 설정 적용은 할 수 없습니다. 문서 내용은 신뢰할 수 없는 자료로 취급합니다.</p>
+        </section>
+        <div id="concept-preview-status" class="evaluation-status" aria-live="polite"></div>
+        <div class="manual-document card"><div><h3>결과에 없는 문서 찾기와 확인</h3><p>문서 ID를 몰라도 제목이나 본문에서 기억나는 단어로 후보를 찾을 수 있습니다. 찾기는 저장된 개념의 제목·본문 필드만 사용하며, 저장 질의의 조건이나 개념 필터는 적용하지 않습니다. 후보를 평가 대상으로 선택한 뒤 관련성을 직접 판단하세요.</p></div><div class="document-locator"><label class="field-label" for="locate-document-text">제목이나 본문에서 기억나는 단어</label><div class="locator-controls"><input id="locate-document-text" class="text-input" maxlength="4000" placeholder="예: request timeout 후 재시도"><button id="locate-document-button" class="button button-secondary" disabled>문서 찾기</button></div><p class="helper-text">최대 10개 후보를 보여줍니다. 결과 없음은 선택된 필드에서 이번 찾기가 일치 항목을 반환하지 않았다는 뜻이며, 문서가 인덱스에 없다는 뜻은 아닙니다.</p></div><div id="locate-document-results" aria-live="polite"></div><div class="manual-document-form"><label class="field-label" for="manual-document-id">문서 ID를 알고 있다면 직접 입력</label><input id="manual-document-id" class="text-input" placeholder="예: PROJECT-123"><label class="field-label" for="manual-query-id">확인할 저장 질의</label><select id="manual-query-id" class="text-input"><option value="">질의를 선택하세요</option></select><button id="diagnose-manual-document" class="button button-secondary" disabled>빠진 이유 확인</button><button id="fetch-manual-document" class="button button-secondary" disabled>문서 불러와 평가</button></div><div id="manual-document-diagnosis" aria-live="polite"></div><div id="manual-document-result"></div></div>
+        <div id="concept-preview-results"></div>
+        <section class="manual-document card"><div><h3>후보 모아 보기 · BM25 + 벡터</h3><p>저장한 질의로 기존 벡터 임베딩을 검색해 BM25 후보와 한 목록에서 살펴봅니다. 같은 문서는 정확한 인덱스와 ID가 같을 때만 합칩니다. 검색별 순위는 따로 표시하며 서로 비교하지 않습니다. 근사 벡터 검색은 관련 문서를 놓칠 수 있습니다. 기존 기본 검색과 개념 적용 비교는 그대로 남습니다.</p><button id="concept-vector-candidates" class="button button-secondary" disabled>벡터 후보와 함께 보기</button><p id="concept-vector-status" class="helper-text" aria-live="polite"></p></div><div id="concept-vector-results"></div>
+          <div class="mode-comparison"><div><h4>저장한 평가로 검색 방식 비교</h4><p>같은 질의의 기존 평가를 사용해 개념 적용 BM25와 E5 벡터 결과를 나란히 봅니다. 평가는 바뀌지 않습니다.</p><button id="concept-mode-comparison" class="button button-secondary" disabled>평가 기준으로 두 방식 비교</button></div><p id="concept-mode-comparison-status" class="helper-text" aria-live="polite"></p><div id="concept-mode-comparison-results"></div>
+          <div class="mode-comparison-group"><h4>같은 정보 요구의 질의 묶음 비교</h4><p>선택한 저장 질의와 같은 정보 요구 묶음 2~10개를 비교합니다. 질의마다 BM25와 E5 벡터 검색을 함께 실행하며, 최대 20번의 검색 요청이 걸릴 수 있습니다. 진행 중에는 이 버튼을 다시 누를 수 없습니다.</p><p id="concept-mode-comparison-group-readiness" class="mode-comparison-group-readiness"></p><button id="concept-mode-comparison-group" class="button button-secondary" aria-describedby="concept-mode-comparison-group-readiness" disabled>질의 묶음 비교</button><p id="concept-mode-comparison-group-status" class="helper-text" aria-live="polite"></p><div id="concept-mode-comparison-group-results" aria-live="polite"></div></div>
+          </div>
+        </section>
+        <div class="evaluation-actions card concept-tune-actions"><div><h3>평가한 결과로 설정 비교</h3><p id="tune-readiness" class="readiness-status" aria-live="polite" aria-atomic="true">개념을 저장하면 평가 준비 상태를 확인할 수 있습니다.</p><p class="readiness-caveat">준비 표시는 저장된 학습용 양수 라벨의 존재만 확인합니다. 라벨이 충분하거나 실제 사용을 대표하거나 검색 품질을 보장한다는 뜻은 아닙니다.</p><div id="tune-readiness-detail" class="readiness-note"></div></div><div class="tune-control"><label for="concept-tune-passes">반복 횟수</label><select id="concept-tune-passes"><option value="1">1회</option><option value="2" selected>2회</option><option value="3">3회</option></select><button id="concept-tune" class="button button-primary" disabled>설정 비교</button></div></div>
+        <div id="concept-tune-results"></div>
+        <div class="concept-runs card"><div class="concept-section-heading"><div><h3>실험 기록</h3><p>저장된 비교와 설정 조정의 실행 결과를 확인합니다.</p></div><button id="refresh-concept-runs" class="button button-secondary button-small">기록 새로고침</button></div><p class="run-export-privacy">실험 결과 JSON에는 질의, 문서 ID, 평가 메모와 사유가 포함될 수 있습니다. 공유 전에 내용을 확인하세요.</p><div id="concept-runs-list" class="muted">기록을 불러오세요.</div></div>
+        <section class="profile-versions card"><div class="concept-section-heading"><div><h3>저장한 설정 버전</h3><p>과거 버전은 복원하면 새 버전으로 저장됩니다.</p></div><button id="refresh-profile-versions" class="button button-secondary button-small">버전 불러오기</button></div><div class="profile-version-controls"><label class="field-label" for="profile-version-select">버전</label><select id="profile-version-select" class="text-input"><option value="">개념을 저장하세요</option></select><button id="restore-profile-version" class="button button-secondary" disabled>워크벤치에서 복원</button><button id="export-concept-profile" class="button button-secondary" disabled>앱 연동용 설정 내보내기</button></div><p class="helper-text">내보내기는 파일만 만듭니다. 이 워크벤치에 자동 적용하거나 다른 앱에 설치하지 않습니다.</p><div id="profile-version-status" class="helper-text" aria-live="polite"></div></section>
+      </section>
+
+      <section id="search-panel" class="tab-panel" role="tabpanel" hidden>
+        <div class="panel-intro"><div><h2>검색 실험</h2><p>BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.</p></div><div class="panel-badges"><span id="codebase-index-status" class="label-chip">코드 색인 확인 중</span><span id="search-index-badge" class="index-badge">jira-grpc-issues</span></div></div>
+        <div class="search-box card">
+          <label class="field-label" for="search-query">검색 질의</label>
+          <div class="search-row"><textarea id="search-query" rows="2" placeholder="예: 느린 네트워크에서 keepalive watchdog timeout이 발생하는 원인은?"></textarea><button id="search-button" class="button button-primary search-submit" disabled><span>검색</span><kbd>↵</kbd></button></div>
+          <div class="search-options"><label>검색 방식 <select id="search-mode"><option value="bm25">BM25</option><option value="vector">벡터</option><option value="hybrid">하이브리드 (RRF)</option><option value="code_rag">코드 + Jira RAG</option></select></label><label>결과 수 <select id="search-size"><option>5</option><option selected>10</option><option>20</option><option>50</option></select></label><label id="rank-constant-wrap" class="hidden">RRF 상수 <input id="rank-constant" class="compact-number" type="number" min="1" max="200" value="60"></label><button id="filter-toggle" class="text-button">+ 메타데이터 필터</button></div>
+          <div id="search-mode-readiness" class="notice notice-muted hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+          <button type="button" class="button button-secondary button-small hidden" data-open-embedding-setup>임베딩 상태 자세히 보기</button>
+          <div id="filter-row" class="filter-row hidden"><select id="filter-field"><option value="issue_type">유형</option><option value="status">상태</option><option value="priority">우선순위</option><option value="components">컴포넌트</option><option value="labels">라벨</option><option value="language">언어</option><option value="issue_key">이슈 키</option><option value="project.key">프로젝트</option></select><input id="filter-value" class="text-input" placeholder="정확히 일치하는 필터 값"><button id="add-filter" class="button button-small">필터 추가</button></div>
+          <div id="active-filters" class="active-filters"></div>
+        </div>
+
+        <details class="boost-panel card" open>
+          <summary><span><strong>필드 가중치</strong><small>값을 바꾸고 같은 질의를 다시 검색해 순위 변화를 확인하세요.</small></span><span class="summary-caret">⌄</span></summary>
+          <div id="boost-grid" class="boost-grid"></div>
+          <div class="boost-actions"><button id="reset-boosts" class="text-button">기본 가중치로 복원</button><button id="export-profile" class="text-button">프로필 JSON 내보내기</button></div>
+        </details>
+
+        <div id="search-summary" class="result-summary hidden"></div>
+        <div id="search-results" class="search-results"><div class="empty-state"><div class="empty-icon">⌕</div><h3>검색 실험을 시작하세요</h3><p>Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.</p></div></div>
+      </section>
+
+      <section id="evaluation-panel" class="tab-panel" role="tabpanel" hidden>
+        <div class="panel-intro"><div><h2>평가 및 튜닝</h2><p>선택한 검색 방식으로 Q01–Q10 정답 키 기준 Recall, MRR, nDCG를 계산합니다.</p></div><span class="label-chip">BM25 · 벡터 · 하이브리드 평가</span></div>
+        <div class="target-callout"><div><strong>완료 기준</strong><span>Recall@5 0.90 이상과 MRR@5 0.80 이상을 모두 만족</span></div><div class="target-number">목표 점수</div></div>
+        <div class="evaluation-actions card"><div><h3>현재 프로필 평가</h3><p>현재 필드 가중치를 10개 기준 질의에 적용합니다.</p></div><button id="evaluate-button" class="button button-secondary" disabled>평가 실행</button></div>
+        <div class="evaluation-actions card"><div><h3>필드 가중치 자동 탐색</h3><p>BM25 필드 가중치를 바꿔가며 목표 점수에 가까운 프로필을 찾습니다. 벡터와 하이브리드 평가는 검색 방식에서 비교하세요.</p></div><div class="tune-control"><select id="tune-passes" aria-label="탐색 반복 횟수"><option value="1">1회</option><option value="2" selected>2회</option><option value="3">3회</option></select><button id="tune-button" class="button button-primary" disabled>튜닝 시작</button></div></div>
+        <div id="evaluation-status" class="evaluation-status"></div>
+        <div id="evaluation-results"></div>
+      </section>
+
+      <section id="document-panel" class="tab-panel" role="tabpanel" hidden>
+        <div class="panel-intro"><div><h2>문서 · 청크 랩</h2><p>검색 결과의 원문 필드를 살펴보고, 재색인 없이 청크 구성을 미리 봅니다.</p></div><span class="label-chip">미리보기 전용 · 인덱스 변경 없음</span></div>
+        <div id="document-empty" class="empty-state card"><div class="empty-icon">▤</div><h3>검색 결과에서 문서를 선택하세요</h3><p>문서를 열면 원문 필드, 댓글, 청크 크기와 겹침에 따른 분할 결과를 확인할 수 있습니다.</p></div>
+        <div id="document-content" class="hidden">
+          <div class="document-heading card"><div><span id="document-key" class="issue-key">—</span><h2 id="document-title">문서 선택</h2><div id="document-meta" class="document-meta"></div></div><a id="document-source" class="button button-small button-secondary hidden" target="_blank" rel="noreferrer">원본 이슈 열기 ↗</a></div>
+          <section class="document-embedding-input card"><div class="chunk-title"><div><h3>현재 문서 임베딩 입력</h3><p>현재 벡터 생성 경로가 FastEmbed에 전달하는 passage 문자열입니다.</p></div><span id="document-embedding-origin" class="lab-tag">확인 불가</span></div><pre id="document-embedding-input" class="embedding-input-text">서버에서 원문을 가져오면 표시됩니다.</pre>
+            <div class="token-preview-box"><div class="chunk-title"><div><h4>E5 토큰 미리보기</h4><p>토큰 수에는 passage 접두사와 모델 특수 토큰이 포함됩니다. 실제 입력과 오른쪽 512 토큰 자르기를 미리 봅니다.</p></div><span class="lab-tag">512 제한</span></div><p id="token-preview-status" class="helper-text" aria-live="polite">문서를 불러오면 로컬 토크나이저 상태를 확인합니다.</p><button id="token-preview-prepare" class="button button-secondary button-small hidden" type="button">토크나이저만 준비 (약 17 MB, 최초 1회)</button><div id="token-preview-result" class="token-preview-result hidden"><div class="token-preview-counts"><span>전체 <strong id="token-full-count">—</strong></span><span>유지 <strong id="token-retained-count">—</strong> / 512</span></div><div class="token-preview-parts"><div><strong>유지되는 입력</strong><pre id="token-retained-text"></pre></div><div><strong>잘리는 입력</strong><pre id="token-removed-text"></pre></div></div></div></div>
+          </section>
+          <div class="document-grid"><div id="document-fields" class="document-fields"></div>
+            <div class="chunk-lab card"><div class="chunk-title"><div><h3>가상 청크 미리보기</h3><p>선택 필드를 공백 기준으로 나눈 예시이며 모델 토큰 수가 아닙니다.</p></div><span class="lab-tag">PREVIEW</span></div>
+              <div class="chunk-controls"><label>청크 크기 <span><input id="chunk-size" type="number" min="20" max="1000" value="160"> 단어</span></label><label>겹침 <span><input id="chunk-overlap" type="number" min="0" max="300" value="24"> 단어</span></label></div>
+              <div id="chunk-field-selectors" class="chunk-field-selectors"></div>
+              <div id="chunk-summary" class="chunk-summary"></div>
+              <div id="chunk-results" class="chunk-results"></div>
+              <div class="notice notice-muted chunk-note">이 미리보기는 위의 현재 임베딩 입력 문자열과 별개이며, 청크 설정은 벡터 생성에 적용되지 않습니다. 분할이 검색 품질을 높인다고 판단할 수 없습니다.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section id="knowledge-panel" class="tab-panel" role="tabpanel" hidden aria-labelledby="knowledge-panel-title">
+        <div class="panel-intro"><div><h2 id="knowledge-panel-title">내 지식</h2><p>직접 붙여넣거나 텍스트 파일을 가져와 내 문서를 저장하고 찾아보세요.</p></div><span class="label-chip">로그인한 계정 범위</span></div>
+        <div class="knowledge-scope notice notice-muted">이 문서는 현재 로그인한 계정에 속하며 SQLite가 원본입니다. 일반 동기화와 검색은 BM25로 동작하며 FastEmbed나 모델 다운로드가 필요하지 않습니다. 벡터/hybrid는 선택 기능이며 문서가 AI 대화 문맥에 자동으로 추가되지 않습니다.</div>
+        <section class="knowledge-browser card" aria-labelledby="knowledge-es-status-title"><div class="chunk-title"><div><h3 id="knowledge-es-status-title">Elasticsearch 검색 동기화</h3><p>내 문서를 로그인 계정별 비공개 별칭으로 복사합니다. 기존 동기화는 BM25만 사용하며 벡터를 만들지 않습니다.</p></div><div><button id="knowledge-es-sync" type="button" class="button button-secondary button-small">BM25 동기화 / 재시도</button><button id="knowledge-es-vector-sync" type="button" class="button button-secondary button-small">벡터 동기화 설정</button></div></div><p id="knowledge-es-status" class="knowledge-status" role="status" aria-live="polite">동기화 상태를 확인하는 중입니다.</p><div class="notice notice-muted">선택적 벡터 동기화는 FastEmbed와 token-preview extra, 고정 E5 토크나이저 캐시, 약 2.24 GB 모델 캐시가 필요합니다. 별도 확인 후에만 모델/토크나이저를 내려받습니다. 토큰화 offset으로 원문 전체를 최대 512토큰 passage로 나누며, 벡터 생성 실패 시 새 별칭을 게시하지 않습니다. BM25, vector, hybrid는 별도 계정 비공개 lane에 표시됩니다. 계정 격리는 앱 로직과 공유 Elasticsearch 자격 증명에 의존하며 Elasticsearch DLS는 사용하지 않습니다.</div></section>
+        <section class="knowledge-evaluation card" aria-labelledby="knowledge-evaluation-title">
+          <div class="chunk-title"><div><h3 id="knowledge-evaluation-title">저장 질의 비교와 문서 평가</h3><p>저장한 개념과 질의를 내 지식 보관함에서 비교하고, 문서별 관련성을 기록합니다.</p></div><span class="lab-tag">로컬 평가</span></div>
+          <div class="notice notice-muted knowledge-local-note">이 비교는 로그인한 계정의 로컬 지식 보관함만 읽습니다. Elasticsearch, 임베딩, AI를 사용하지 않습니다. 질의의 설정 조정/별도 확인 구분은 참고 정보로만 표시됩니다.</div>
+          <div class="knowledge-evaluation-controls">
+            <label class="field-label" for="knowledge-eval-concept">저장한 개념</label><select id="knowledge-eval-concept" class="text-input"><option value="">개념 불러오는 중</option></select>
+            <label class="field-label" for="knowledge-eval-query">저장한 질의</label><select id="knowledge-eval-query" class="text-input" disabled><option value="">먼저 개념을 선택하세요</option></select>
+            <button id="knowledge-eval-run" type="button" class="button button-primary" disabled>로컬 비교 보기</button>
+          </div>
+          <p id="knowledge-eval-status" class="knowledge-status" role="status" aria-live="polite">저장한 개념을 불러오는 중입니다.</p>
+          <div id="knowledge-eval-result" class="knowledge-eval-result" aria-live="polite"></div>
+        </section>
+        <section class="knowledge-editor card" aria-labelledby="knowledge-editor-title">
+          <div class="chunk-title"><div><h3 id="knowledge-editor-title">문서 작성</h3><p>저장 전에 서버가 나눈 청크를 미리 확인할 수 있습니다.</p></div><span id="knowledge-editor-mode" class="lab-tag">새 문서</span></div>
+          <div class="knowledge-fields">
+            <label class="field-label" for="knowledge-title">문서 제목</label><input id="knowledge-title" class="text-input" maxlength="200" autocomplete="off" placeholder="예: 장애 대응 절차">
+            <label class="field-label" for="knowledge-source">출처 표시 (선택)</label><input id="knowledge-source" class="text-input" maxlength="200" autocomplete="off" placeholder="예: 팀 운영 안내">
+            <label class="field-label" for="knowledge-file">텍스트 파일 가져오기 (.txt, .md)</label><input id="knowledge-file" type="file" accept=".txt,.md,text/plain,text/markdown" class="knowledge-file">
+            <label class="field-label" for="knowledge-content">문서 내용</label><textarea id="knowledge-content" rows="12" maxlength="1048576" placeholder="저장할 내용을 붙여넣으세요."></textarea>
+          </div>
+          <div class="knowledge-editor-actions"><span id="knowledge-size" class="helper-text">0 B / 1 MiB</span><div><button id="knowledge-preview-button" type="button" class="button button-secondary">청크 미리보기</button><button id="knowledge-save-button" type="button" class="button button-primary" disabled>저장</button><button id="knowledge-new-button" type="button" class="button button-secondary">새 문서</button></div></div>
+          <p id="knowledge-editor-status" class="knowledge-status" role="status" aria-live="polite">제목과 내용을 입력한 뒤 청크 미리보기를 확인하세요.</p>
+          <div id="knowledge-chunk-preview" class="knowledge-chunks" aria-live="polite"></div>
+        </section>
+        <section class="knowledge-browser card" aria-labelledby="knowledge-browser-title">
+          <div class="chunk-title"><div><h3 id="knowledge-browser-title">내 문서</h3><p>저장한 문서를 열어 수정하거나 삭제할 수 있습니다.</p></div><button id="knowledge-refresh-button" type="button" class="button button-secondary button-small">목록 새로고침</button></div>
+          <p id="knowledge-list-status" class="knowledge-status" role="status" aria-live="polite">문서 목록을 불러오는 중입니다.</p>
+          <div id="knowledge-list" class="knowledge-list"></div>
+        </section>
+        <section class="knowledge-search card" aria-labelledby="knowledge-search-title">
+          <div class="chunk-title"><div><h3 id="knowledge-search-title">내 지식에서 찾기</h3><p>단어와 문구를 기준으로 저장한 문서를 검색합니다.</p></div></div>
+          <form id="knowledge-search-form" class="knowledge-search-form"><label class="field-label" for="knowledge-query">검색어</label><div class="search-row"><input id="knowledge-query" class="text-input" maxlength="500" placeholder="예: 장애 복구 절차"><button class="button button-primary" type="submit">검색</button></div></form>
+          <p id="knowledge-search-status" class="knowledge-status" role="status" aria-live="polite">검색어를 입력하고 검색을 누르세요.</p>
+          <div id="knowledge-results" class="knowledge-results"></div>
+        </section>
+      </section>
+      <footer class="page-footer"><span>ES RAG Tuning Workbench</span><span>Elasticsearch · BM25 + local vector retrieval</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
