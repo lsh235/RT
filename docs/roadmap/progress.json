@@ -184,7 +184,7 @@
         "docs/acceptance/v1.12.0.md",
         "docs/acceptance/v1.12.0-independent-qa.md"
       ],
-      "commit": null,
+      "commit": "a4d68c8882e80bedb7328b75e4af53748517641a",
       "blockers": [],
       "tag": "v1.12.0"
     },
@@ -312,7 +312,7 @@
       "evidence": "docs/acceptance/v1.12.0.md; docs/acceptance/v1.12.0-independent-qa.md"
     }
   ],
-  "completed_commit": "217a3b0a86ab4414a2d5a3fa17e354a5a45d2cb2",
+  "completed_commit": "a4d68c8882e80bedb7328b75e4af53748517641a",
   "remaining_blockers": [
     "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. The user indicated separate permission evidence can be supplied, but no evidence has been received or verified yet. Recheck with the content owners or remove/replace the data before public release.",
     "GitHub-hosted CI has not run; verify after the final authorized branch push.",
