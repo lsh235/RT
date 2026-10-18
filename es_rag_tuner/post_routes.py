@@ -20,6 +20,7 @@ def resolve_post(handler: Any, path: str) -> Callable[[dict[str, Any]], dict[str
         "/api/vectorize": handler._vectorize,
         "/api/mapping": handler._mapping,
         "/api/search": handler._search,
+        "/api/reranker/prepare": handler._reranker_prepare,
         "/api/code-rag": handler._code_rag,
         "/api/explain": handler._explain,
         "/api/document": handler._document,

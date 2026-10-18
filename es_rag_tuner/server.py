@@ -22,6 +22,7 @@ from . import embeddings
 from . import concepts
 from . import ai_coach
 from . import token_preview
+from . import reranker as local_reranker
 from . import auth
 from . import knowledge
 from . import post_routes
@@ -373,6 +374,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 self._api_error(503, "Private knowledge sync status is temporarily unavailable.", "KNOWLEDGE_UNAVAILABLE")
         elif path == "/api/token-preview/status":
             self._json(200, _public_token_preview_result(token_preview.status()))
+        elif path == "/api/reranker/status":
+            self._json(200, local_reranker.status())
         elif path == "/api/codebase-status":
             try:
                 self._json(200, codebase.status())
@@ -691,6 +694,9 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def _vectorize(self, payload: dict[str, Any]) -> dict[str, Any]:
         return vectorize_index(self._connection(payload), self._index(payload), payload.get("profile_id"))
 
+    def _reranker_prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return local_reranker.prepare(payload.get("consent"))
+
     def _search(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
         index = self._index(payload)
@@ -699,17 +705,21 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             raise ElasticsearchError("검색어를 입력하세요.")
         if len(query_text) > 4000:
             raise ElasticsearchError("검색어는 4000자 이하로 입력하세요.")
-        try:
-            size = max(1, min(int(payload.get("size", 10)), 50))
-        except (TypeError, ValueError):
-            raise ElasticsearchError("결과 개수는 1~50 사이 정수여야 합니다.") from None
+        size = payload.get("size", 10)
+        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 50:
+            raise ElasticsearchError("결과 개수는 1~50 사이 정수여야 합니다.")
+        candidate_pool = payload.get("candidate_pool", size)
+        if not isinstance(candidate_pool, int) or isinstance(candidate_pool, bool) or not size <= candidate_pool <= 200:
+            raise ElasticsearchError("candidate_pool은 top-K 이상 200 이하 정수여야 합니다.")
+        rerank = payload.get("rerank", False)
+        if not isinstance(rerank, bool):
+            raise ElasticsearchError("rerank 값은 boolean이어야 합니다.")
         boosts = self._boosts(payload)
         filters = self._filters(payload)
         mode = str(payload.get("mode", "bm25")).strip().lower()
-        try:
-            rank_constant = int(payload.get("rank_constant", 60))
-        except (TypeError, ValueError):
-            raise ElasticsearchError("RRF rank constant는 정수여야 합니다.") from None
+        rank_constant = payload.get("rank_constant", 60)
+        if not isinstance(rank_constant, int) or isinstance(rank_constant, bool) or not 1 <= rank_constant <= 200:
+            raise ElasticsearchError("RRF rank constant는 1~200 사이 정수여야 합니다.")
         if mode in {"vector", "hybrid"}:
             # Reject account-private aliases before the shared-lane fallback:
             # the client-side index is untrusted and the request guard remains
@@ -723,11 +733,14 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                     connection, index, query_text, size, boosts, filters,
                     mode=mode, rank_constant=rank_constant, source_fields=DISPLAY_FIELDS,
                     profile_id=payload.get("profile_id"),
+                    candidate_pool=candidate_pool, rerank=rerank,
                 )
                 result["shared_search"] = {"state": "available"}
             except PrivateIndexAccessError:
                 raise
             except ElasticsearchError as exc:
+                if rerank:
+                    raise
                 if not _shared_vector_failure_is_unavailable(exc):
                     raise
                 # Shared vector readiness is independent of the account-private
@@ -746,6 +759,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 rank_constant=rank_constant,
                 source_fields=DISPLAY_FIELDS,
                 profile_id=payload.get("profile_id"),
+                candidate_pool=candidate_pool, rerank=rerank,
             )
         try:
             private = knowledge.search_es_mode(connection, query_text, mode, size, payload.get("profile_id"))
@@ -762,11 +776,19 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             raise ElasticsearchError("검색어를 입력하세요.")
         if len(query_text) > 4000:
             raise ElasticsearchError("검색어는 4000자 이하로 입력하세요.")
-        try:
-            size = max(1, min(int(payload.get("size", 5)), 10))
-            rank_constant = int(payload.get("rank_constant", 60))
-        except (TypeError, ValueError):
-            raise ElasticsearchError("결과 개수 또는 RRF rank constant 값이 올바르지 않습니다.") from None
+        size = payload.get("size", 10)
+        if not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= 50:
+            raise ElasticsearchError("결과 개수는 1~50 사이 정수여야 합니다.")
+        candidate_pool = payload.get("candidate_pool", size)
+        if not isinstance(candidate_pool, int) or isinstance(candidate_pool, bool) or not size <= candidate_pool <= 200:
+            raise ElasticsearchError("candidate_pool은 top-K 이상 200 이하 정수여야 합니다.")
+        rank_constant = payload.get("rank_constant", 60)
+        if not isinstance(rank_constant, int) or isinstance(rank_constant, bool) or not 1 <= rank_constant <= 200:
+            raise ElasticsearchError("RRF rank constant는 1~200 사이 정수여야 합니다.")
+        rerank = payload.get("rerank", False)
+        if not isinstance(rerank, bool):
+            raise ElasticsearchError("rerank 값은 boolean이어야 합니다.")
+        guard_shared_index_access(index)
         boosts = self._boosts(payload)
         filters = self._filters(payload)
         issues = retrieve(
@@ -780,6 +802,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             rank_constant=rank_constant,
             source_fields=DISPLAY_FIELDS,
             profile_id=payload.get("profile_id"),
+            candidate_pool=candidate_pool,
+            rerank=rerank,
         )
         code = codebase.search(query_text, issues.get("hits", []), size)
         return {

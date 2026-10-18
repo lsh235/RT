@@ -51,7 +51,7 @@ async function main() {
       calls.push({ path: url.pathname, body });
       const json = value => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
       if (url.pathname === "/api/auth/session") return json({ configured: true, authenticated: true, csrf_token: "fixture-csrf", user: { id: "fixture-account", username: "fixture", display_name: "Fixture", role: "user" } });
-      if (url.pathname === "/api/health") return json({ version: "1.11.0" });
+      if (url.pathname === "/api/health") return json({ version: "1.12.0" });
       if (url.pathname === "/api/embedding/profiles") return json({ default_profile_id: "e5-multilingual-large", profiles });
       if (url.pathname === "/api/connect") return json({ cluster_name: "synthetic", version: "9.5.5", selected_index: body.index || "fixture-index", selected_index_exists: true, selected_index_count: 2, sample_expected_count: 0, sample_data_metadata_count: 0, indices: [{ index: body.index || "fixture-index" }], embedding: { profile_id: body.profile_id, model_name: profiles.find(p => p.profile_id === body.profile_id)?.model_name, profile_dimensions: profiles.find(p => p.profile_id === body.profile_id)?.dimensions, mapping_available: true, mapping_dimensions: mappingDimensions, mapping_compatible: mappingDimensions === profiles.find(p => p.profile_id === body.profile_id)?.dimensions, mapping_error: mappingDimensions === profiles.find(p => p.profile_id === body.profile_id)?.dimensions ? null : "Stored vector recipe does not match the selected profile.", runtime_installed: true, model_cached: true, vector_count: 1, document_count: 2 } });
       if (url.pathname === "/api/concepts/list") return json({ concepts: [] });

@@ -101,6 +101,9 @@ const state = {
   locale: "ko",
   connectionGuidance: { keys: ["connectHint"], index: "" },
   sampleImportedTarget: "",
+  rerankerStatus: null,
+  rerankerPrepareInProgress: false,
+  rerankerError: "",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -188,12 +191,12 @@ function safeEndpoint(value) {
 
 const UI_COPY = {
   ko: {
-    endpointLabel: "Endpoint", authLabel: "인증 방식", authNone: "인증 없음", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "검색 인덱스", searchTitle: "검색 실험", searchIntro: "BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.", searchQuery: "검색 질의", searchButton: "검색", searchEmptyTitle: "검색 실험을 시작하세요", searchEmptyCopy: "Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.",
+    endpointLabel: "Endpoint", authLabel: "인증 방식", authNone: "인증 없음", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "검색 인덱스", searchTitle: "검색 실험", searchIntro: "BM25, dense vector, RRF를 비교하거나 코드 색인과 Jira 이슈를 함께 검색합니다.", searchQuery: "검색 질의", searchButton: "검색", searchEmptyTitle: "검색 실험을 시작하세요", searchEmptyCopy: "Elasticsearch에 연결한 다음 질문을 입력하면 실제 인덱스의 문서와 점수를 보여줍니다.", searchModeLabel: "검색 방식", topKLabel: "최종 Top-K", candidatePoolLabel: "후보 수집 풀", topKHelp: "최종 표시 결과 수 · 1–50", candidatePoolHelp: "검색 후보 수 · 최소 최종 Top-K, 최대 200", rerankerTitle: "선택형 로컬 재순위화", rerankerOptional: "선택 사항", rerankerIntro: "로컬 cross-encoder는 명시적으로 준비한 뒤에만 사용할 수 있습니다. 일반 검색은 모델을 내려받지 않습니다.", rerankerLoading: "재순위화 준비 상태 확인 중…", rerankerConsent: "모델 파일 다운로드에 동의합니다 (약 2.3 GB).", rerankerPrepare: "동의 후 모델 준비 및 다운로드", rerankerEnable: "검색 후보 재순위화 사용", rerankerScoreNote: "모델·BM25·벡터·RRF 점수는 보정되지 않은 진단용 원점수이며 확률이 아닙니다.", rerankerNotReady: "선택형 재순위화 런타임 또는 모델 캐시가 준비되지 않았습니다. 다운로드는 검색과 분리되어 있습니다.", rerankerReady: "모델이 준비되었습니다. 재순위화는 선택 사항이며 검색 시에만 실행됩니다.", rerankerPrepareBusy: "동의한 모델 파일을 내려받고 준비하는 중…", rerankerPrepareFailed: "모델을 준비하지 못했습니다: {message}", rerankerPrepareDone: "모델을 준비했습니다. 이제 재순위화를 켤 수 있습니다.", rerankerSearchUnavailable: "재순위화 요청이 실패했습니다. 검색 모드를 바꾸지 않았습니다: {message}", rerankerDisabled: "재순위화가 꺼져 있습니다.", rerankerLoadingFailed: "재순위화 상태를 확인하지 못했습니다: {message}", rerankerDownloadConsentRequired: "다운로드 전에 체크박스에 동의하세요.", rerankerBoundsError: "최종 Top-K는 1–50, 후보 풀은 최종 Top-K 이상 200 이하여야 합니다.",
     connectTitle: "Elasticsearch 연결", connectIntro: "연결 프로필에는 endpoint, 인덱스, 인증 방식만 저장합니다. 사용자 이름, 비밀번호, API 키는 저장하지 않습니다.", profilesTitle: "저장한 연결 프로필", noProfiles: "프로필 없음", profileLoad: "불러오기", profileSave: "현재 설정 저장", profileDelete: "선택 프로필 삭제", profileNote: "이 브라우저에 endpoint, 인덱스, 인증 방식만 저장합니다. 사용자 이름, 비밀번호, API 키는 저장하지 않습니다.", notConnected: "연결 전", connectHint: "먼저 연결하세요. 연결이 끝나면 인덱스 필드를 확인하고 첫 검색을 시작할 수 있습니다.", firstUsePath: "처음이라면 순서대로 진행하세요: 연결 → 필드 확인 및 적용 → 첫 검색 → 문서 관련도 저장 → 검색 모드 비교.", queryLabel: "어떤 내용을 찾고 싶나요?", firstSearchButton: "이 내용으로 결과 보기", queryHelp: "첫 질문은 설정 조정에 사용합니다. 다른 질문은 조정에 쓰지 않고 결과가 유지되는지 따로 확인할 수 있습니다.", modeHelp: "개념 검색은 선택한 필드에서 표현을 찾습니다. 벡터·혼합 검색은 ‘검색 실험’ 탭에서 계속 사용할 수 있습니다.",
     connectLabel: "연결 확인", connecting: "연결 중", checking: "Elasticsearch 확인 중", connected: "연결됨", failed: "연결 실패", invalid: "Endpoint 주소를 확인하세요. 사용자 이름, 비밀번호, query string, fragment를 URL에 넣지 말고 인증 칸을 사용하세요.", unreachable: "Elasticsearch에 연결할 수 없습니다. 주소와 서비스 상태를 확인한 뒤 다시 시도하세요.", forbidden: "접근 권한이 없습니다 (403). 계정에 클러스터/인덱스 읽기 권한이 있는지 관리자에게 확인하세요.", emptyIndex: "인덱스가 비어 있습니다. 필드와 문서가 있는 인덱스를 선택하거나, 새 인덱스에서만 선택 사항인 샘플 가져오기를 사용할 수 있습니다.", ready: "연결했습니다. 1단계에서 필드를 확인하고, 첫 검색 후 문서 관련도를 직접 저장하세요.", vectorUnavailable: "벡터 검색은 아직 준비되지 않았습니다. 일반 검색은 사용할 수 있습니다. 호환 벡터 매핑, 로컬 런타임, 문서 임베딩이 필요합니다.", sample: "현재 세션에서 명시적으로 가져온 제공 샘플", realIndex: "선택한 기존 인덱스 · 샘플 정체 미확인", newIndex: "선택한 새 인덱스 대상", sampleOptional: "새 인덱스에서 제공된 샘플을 가져올 수 있습니다. 가져오기는 선택 사항이며 기존 인덱스에는 적재하지 않습니다.", fieldLoading: "{index} 필드와 예시 문서를 불러오는 중…", fieldLoadFailed: "필드와 예시 문서를 불러오지 못했습니다. 연결 권한과 인덱스를 확인한 뒤 다시 시도하세요.", fieldSummary: "추천 필드 · 확인 후 적용", titleField: "제목", textField: "본문", filterField: "필터", applyFields: "추천 필드 적용", inspectCriteria: "추천 기준", fieldList: "필드 목록 보기 · {count}개", noTitleCandidate: "직접 선택 필요", noFields: "없음", samplePicker: "예시 문서 선택", sampleDoc: "예시 {n} / {total}", sampleTitle: "제목", missingSampleTitle: "추천 제목 필드에 값이 없습니다. 문서 ID {id}를 표시합니다.", noSampleBody: "추천 본문 필드에서 표시할 값이 없습니다.", sampleCaveat: "아래 문서는 몇 개의 예시일 뿐입니다. 전체 인덱스의 필드 포함 여부, 검색 가능성 또는 관련성을 나타내지 않습니다.", transferQuery: "검색 시작 문구로 옮기기", editableQueryNote: "예시에서 만든 편집 가능한 시작 문구입니다. 내용을 다듬은 뒤 직접 ‘이 내용으로 결과 보기’를 선택하세요.", noSampleDocs: "예시 문서가 없습니다. 연결과 인덱스를 확인하세요.", fieldsLoaded: "{count}개 필드를 확인했습니다. 추천을 적용하거나 고급 설정에서 직접 고를 수 있습니다.", fieldsApplied: "추천 필드를 적용했습니다. 제목과 본문 필드를 확인한 뒤 검색하세요.", fieldsAppliedToast: "추천 필드를 입력란에 적용했습니다. 저장 전에 목록을 확인하세요.", fieldApplySummary: "적용할 필드: 제목 {title} · 본문 {text} · 조건 필드 {filters}", sampleMissing: "{index} 인덱스가 아직 없습니다. 제공된 샘플 {count}건을 이 새 인덱스에 적재할 수 있습니다. 가져오기는 선택 사항이며 기존 인덱스는 덮어쓰지 않습니다.", sampleExisting: "기존 인덱스 · 문서 {count}건 · 샘플 정체 미확인 · 기존 인덱스에는 샘플을 적재하지 않습니다.", sampleImportedStatus: "현재 세션에서 제공 샘플을 명시적으로 가져왔습니다 · 문서 {count}건.", sampleMeta: "첨부 메타데이터 {metadata}건 · NDJSON 샘플 {count}건", judgment: "문서별 관련도를 직접 판단해 저장하세요. 이 기록은 자동 채점이 아닙니다.", comparison: "평가 기록이 생기면 검색 실험 또는 평가 및 튜닝에서 같은 질의로 BM25, 벡터, 혼합 모드를 비교할 수 있습니다. 비교 결과가 품질을 자동으로 판정하지는 않습니다."
   },
   en: {
-    endpointLabel: "Endpoint URL", authLabel: "Authentication", authNone: "None", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "Search index", searchTitle: "Search experiments", searchIntro: "Compare BM25, dense vector, and RRF, or search the code index with Jira issues.", searchQuery: "Search query", searchButton: "Search", searchEmptyTitle: "Start a search experiment", searchEmptyCopy: "Connect to Elasticsearch and enter a question to view documents and scores from the selected index.",
+    endpointLabel: "Endpoint URL", authLabel: "Authentication", authNone: "None", authBasic: "Basic Auth", authApiKey: "API Key", indexLabel: "Search index", searchTitle: "Search experiments", searchIntro: "Compare BM25, dense vector, and RRF, or search the code index with Jira issues.", searchQuery: "Search query", searchButton: "Search", searchEmptyTitle: "Start a search experiment", searchEmptyCopy: "Connect to Elasticsearch and enter a question to view documents and scores from the selected index.", searchModeLabel: "Search mode", topKLabel: "Final top-K", candidatePoolLabel: "Candidate pool", topKHelp: "Final number of results · 1–50", candidatePoolHelp: "Retrieved candidate count · at least final top-K, at most 200", rerankerTitle: "Optional local reranking", rerankerOptional: "Optional", rerankerIntro: "The local cross-encoder is available only after explicit preparation. Normal searches never download the model.", rerankerLoading: "Checking reranker readiness…", rerankerConsent: "I consent to downloading model files (about 2.3 GB).", rerankerPrepare: "Prepare and download model after consent", rerankerEnable: "Rerank search candidates", rerankerScoreNote: "Model, BM25, vector, and RRF scores are raw diagnostic scores, not probabilities.", rerankerNotReady: "The optional reranker runtime or model cache is not ready. Downloads are separate from search.", rerankerReady: "The model is ready. Reranking is optional and runs only when requested.", rerankerPrepareBusy: "Downloading and preparing the consented model…", rerankerPrepareFailed: "Could not prepare the model: {message}", rerankerPrepareDone: "Model prepared. You can now enable reranking.", rerankerSearchUnavailable: "Reranking request failed. Search mode was not changed: {message}", rerankerDisabled: "Reranking is off.", rerankerLoadingFailed: "Could not check reranker status: {message}", rerankerDownloadConsentRequired: "Check the consent box before downloading.", rerankerBoundsError: "Final top-K must be 1–50 and candidate pool must be at least top-K and no more than 200.",
     connectTitle: "Connect Elasticsearch", connectIntro: "Profiles save only the endpoint, index, and authentication type. Usernames, passwords, and API keys are not saved.", profilesTitle: "Saved connection profiles", noProfiles: "No profiles", profileLoad: "Load", profileSave: "Save current settings", profileDelete: "Delete selected profile", profileNote: "Only the endpoint, index, and auth type are saved in this browser. Username, password, and API key are never saved.", notConnected: "Not connected", connectHint: "Connect first. Then inspect index fields and start your first search.", firstUsePath: "New here? Follow these steps: connect → inspect and apply fields → first search → save document relevance → compare search modes.", queryLabel: "What do you want to find?", firstSearchButton: "Show results for this query", queryHelp: "Your first query is used to tune settings. Try other queries separately to check whether results hold up.", modeHelp: "Concept search looks for terms in selected fields. Vector and hybrid search are available in the Search experiments tab.",
     connectLabel: "Check connection", connecting: "Connecting", checking: "Checking Elasticsearch", connected: "Connected", failed: "Connection failed", invalid: "Check the endpoint URL. Do not put usernames, passwords, query strings, or fragments in the URL; use the authentication fields.", unreachable: "Elasticsearch could not be reached. Check the endpoint and service, then try again.", forbidden: "Access denied (403). Ask an administrator to check cluster and index read permissions.", emptyIndex: "This index is empty. Select an index with fields and documents, or use the optional sample import only for a new index.", ready: "Connected. Inspect fields in step 1, search, then save your own relevance judgment.", vectorUnavailable: "Vector search is not ready. Standard search remains available. A compatible vector mapping, local runtime, and document embeddings are required.", sample: "Supplied sample data explicitly imported in this session", realIndex: "Selected existing index · sample identity unverified", newIndex: "Selected new index target", sampleOptional: "You can import the supplied sample into a new index. Import is optional and never writes into an existing index.", fieldLoading: "Loading fields and example documents for {index}…", fieldLoadFailed: "Could not load fields and example documents. Check index access and try again.", fieldSummary: "Suggested fields · review before applying", titleField: "Title", textField: "Text", filterField: "Filter", applyFields: "Apply suggested fields", inspectCriteria: "How suggestions are chosen", fieldList: "View all {count} fields", noTitleCandidate: "Choose manually", noFields: "None", samplePicker: "Choose an example document", sampleDoc: "Example {n} / {total}", sampleTitle: "Title", missingSampleTitle: "The suggested title field has no value. Showing document ID {id}.", noSampleBody: "No values to show from the suggested text fields.", sampleCaveat: "These are a few examples. They do not represent field coverage, searchability, or relevance for the full index.", transferQuery: "Use as a starting query", editableQueryNote: "This editable query was assembled from the example. Revise it, then choose “Show results for this query”.", noSampleDocs: "No example documents are available. Check the connection and index.", fieldsLoaded: "Reviewed {count} fields. Apply the suggestions or choose fields in advanced settings.", fieldsApplied: "Suggested fields are applied. Review the title and text fields, then search.", fieldsAppliedToast: "Suggested fields are in the form. Review them before saving.", fieldApplySummary: "Fields to apply: title {title} · text {text} · filter {filters}", sampleMissing: "Index {index} does not exist yet. You may import {count} supplied sample documents into this new index. Import is optional; existing indexes are not overwritten.", sampleExisting: "Selected existing index · {count} documents · sample identity unverified · sample import is unavailable for existing indexes.", sampleImportedStatus: "Supplied sample explicitly imported in this session · {count} documents.", sampleMeta: "Attached metadata: {metadata} · sample NDJSON: {count}", judgment: "Judge each document's relevance and save it yourself. This is not automatic grading.", comparison: "After saving judgments, compare BM25, vector, and hybrid modes for the same query in Search experiments or Evaluation. The comparison does not automatically determine quality."
   }
@@ -209,6 +212,7 @@ function applyLocale(locale) {
   state.locale = locale === "en" ? "en" : "ko";
   document.documentElement.lang = state.locale;
   $("#ui-language").value = state.locale;
+  renderRerankerStatus();
   $$('[data-i18n]').forEach(node => { const value = copy(node.dataset.i18n); if (value) node.textContent = value; });
   $("#es-url").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch endpoint URL" : "Elasticsearch endpoint 주소");
   $("#index-name").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch index name" : "Elasticsearch 인덱스 이름");
@@ -2045,6 +2049,19 @@ async function runSearch() {
   if (!state.connected) return showToast("먼저 Elasticsearch에 연결하세요.", true);
   const query = $("#search-query").value.trim();
   if (!query) return showToast("검색 질의를 입력하세요.", true);
+  const topK = Number($("#search-size").value);
+  const candidatePool = Number($("#candidate-pool").value);
+  if (!Number.isInteger(topK) || topK < 1 || topK > 50 || !Number.isInteger(candidatePool) || candidatePool < topK || candidatePool > 200) {
+    const message = copy("rerankerBoundsError");
+    $("#search-results").innerHTML = `<div class="notice notice-error" role="status">${escapeHtml(message)}</div>`;
+    return showToast(message, true);
+  }
+  if ($("#reranker-enabled").checked && !state.rerankerStatus?.ready) {
+    const message = copy("rerankerNotReady");
+    $("#reranker-status").textContent = message;
+    $("#reranker-status").dataset.state = "failed";
+    return showToast(message, true);
+  }
   const button = $("#search-button");
   const mode = $("#search-mode").value;
   if (isVectorDependentMode(mode)) {
@@ -2056,7 +2073,7 @@ async function runSearch() {
   $("#search-results").innerHTML = `<div class="empty-state"><span class="loading-inline"><i class="spinner"></i> ${state.locale === "en" ? (mode === "code_rag" ? "Searching Jira and the gRPC code index" : "Searching Elasticsearch") : (mode === "code_rag" ? "Jira와 gRPC 코드 색인 검색 중" : "Elasticsearch 검색 중")}</span></div>`;
   $("#search-summary").classList.add("hidden");
   try {
-    const payload = requestPayload({ query, size: Number($("#search-size").value), boosts: readBoosts(), filters: readFilters(), mode, rank_constant: Number($("#rank-constant").value), ...(mode === "vector" || mode === "hybrid" || mode === "code_rag" ? { profile_id: state.sharedProfileId } : {}) });
+    const payload = requestPayload({ query, size: topK, candidate_pool: candidatePool, rerank: $("#reranker-enabled").checked, boosts: readBoosts(), filters: readFilters(), mode, rank_constant: Number($("#rank-constant").value), ...(mode === "vector" || mode === "hybrid" || mode === "code_rag" ? { profile_id: state.sharedProfileId } : {}) });
     if (mode === "code_rag") {
       const result = await api("/api/code-rag", payload);
       state.lastSearch = { ...payload, result: { ...result.issues, mode: "hybrid" } };
@@ -2067,13 +2084,94 @@ async function runSearch() {
       renderSearch(result, query);
     }
   } catch (error) {
-    const message = state.locale === "en" ? "Search failed. Check the connection, index, and permissions, then retry." : error.message;
+    const message = $("#reranker-enabled").checked ? copy("rerankerSearchUnavailable").replace("{message}", error.message) : (state.locale === "en" ? "Search failed. Check the connection, index, and permissions, then retry." : error.message);
     $("#search-results").innerHTML = `<div class="notice notice-error" role="status" aria-live="polite">${escapeHtml(message)}</div>`;
     showToast(message, true);
   } finally {
     button.innerHTML = `<span>${state.locale === "en" ? "Search" : "검색"}</span><kbd>↵</kbd>`;
     button.disabled = !state.connected;
   }
+}
+
+function syncSearchBounds() {
+  const topK = Number($("#search-size").value);
+  const pool = $("#candidate-pool");
+  pool.min = String(Math.max(1, Number.isInteger(topK) ? topK : 1));
+  if (Number.isInteger(topK) && topK >= 1 && topK <= 50 && (!Number.isInteger(Number(pool.value)) || Number(pool.value) < topK)) pool.value = String(Math.max(50, topK));
+  pool.setCustomValidity(Number(pool.value) < topK ? copy("rerankerBoundsError") : "");
+}
+
+function renderRerankerStatus(errorMessage = "") {
+  const status = $("#reranker-status");
+  if (!status) return;
+  const ready = state.rerankerStatus?.ready === true;
+  const consent = $("#reranker-consent")?.checked === true;
+  const prepare = $("#reranker-prepare");
+  const enabled = $("#reranker-enabled");
+  const busy = state.rerankerPrepareInProgress;
+  errorMessage = errorMessage || state.rerankerError;
+  status.dataset.state = busy ? "running" : errorMessage ? "failed" : ready ? "ready" : state.rerankerStatus ? "unavailable" : "loading";
+  if (busy) status.textContent = copy("rerankerPrepareBusy");
+  else if (errorMessage) status.textContent = copy("rerankerLoadingFailed").replace("{message}", errorMessage);
+  else if (ready) status.textContent = copy("rerankerReady");
+  else status.textContent = state.rerankerStatus ? copy("rerankerNotReady") : copy("rerankerLoading");
+  if (state.rerankerStatus && !busy && !errorMessage) {
+    const info = state.rerankerStatus;
+    const runtime = info.runtime && typeof info.runtime === "object" ? info.runtime : {};
+    const cache = info.cache && typeof info.cache === "object" ? info.cache : {};
+    const runtimeInstalled = runtime.installed ?? info.runtime_installed;
+    const runtimeVersion = runtime.version ?? info.runtime_version;
+    const cacheReady = cache.ready ?? info.cache_ready;
+    const facts = [];
+    if (runtimeInstalled != null) facts.push((state.locale === "en" ? "runtime " : "런타임 ") + (runtimeInstalled ? "ready" : "missing"));
+    if (runtimeVersion) facts.push(String(runtimeVersion));
+    if (cacheReady != null) facts.push((state.locale === "en" ? "cache " : "캐시 ") + (cacheReady ? "ready" : "missing"));
+    if (info.loaded != null) facts.push((state.locale === "en" ? "loaded " : "로드 ") + String(info.loaded));
+    if (info.device) facts.push((state.locale === "en" ? "device " : "장치 ") + String(info.device));
+    if (facts.length) status.textContent += " · " + facts.join(" · ");
+  }
+  if (ready && !enabled.checked) status.textContent += state.locale === "en" ? " · Reranking is off." : " · 재순위화 꺼짐.";
+  prepare.disabled = !consent || busy;
+  enabled.disabled = !ready;
+  if (!ready) enabled.checked = false;
+}
+
+async function loadRerankerStatus() {
+  try {
+    const response = await fetch("/api/reranker/status", { method: "GET", cache: "no-store", credentials: "same-origin" });
+    let result = {};
+    try { result = await response.json(); } catch {}
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    state.rerankerStatus = result;
+    state.rerankerError = "";
+    renderRerankerStatus();
+  } catch (error) { state.rerankerError = error.message; renderRerankerStatus(error.message); }
+}
+
+async function prepareReranker() {
+  if (!$("#reranker-consent").checked) {
+    $("#reranker-status").textContent = copy("rerankerDownloadConsentRequired");
+    $("#reranker-status").dataset.state = "failed";
+    return;
+  }
+  state.rerankerPrepareInProgress = true;
+  renderRerankerStatus();
+  try {
+    const result = await api("/api/reranker/prepare", { consent: true });
+    state.rerankerStatus = result.status || result;
+    await loadRerankerStatus();
+    if (!state.rerankerStatus?.ready) {
+      $("#reranker-status").textContent = copy("rerankerPrepareFailed").replace("{message}", result.error || "model is not ready");
+      $("#reranker-status").dataset.state = "failed";
+    } else {
+      $("#reranker-status").textContent = copy("rerankerPrepareDone");
+      $("#reranker-status").dataset.state = "ready";
+    }
+  } catch (error) {
+    state.rerankerError = error.message;
+    $("#reranker-status").textContent = copy("rerankerPrepareFailed").replace("{message}", error.message);
+    $("#reranker-status").dataset.state = "failed";
+  } finally { state.rerankerPrepareInProgress = false; renderRerankerStatus(); }
 }
 
 function renderCodeRag(result, query) {
@@ -2085,7 +2183,6 @@ function renderCodeRag(result, query) {
   const summary = $("#search-summary");
   summary.innerHTML = `<strong>${issueHits.length}</strong> Jira 근거 <span>·</span><strong>${codeHits.length}</strong> 코드 발췌 <span>·</span><strong>${semanticHits.length}</strong> 의미 검색 후보 <span>·</span><span>project ${escapeHtml(code.project || "grpc")}</span>${scoreGuidance("hybrid")}`;
   summary.classList.remove("hidden");
-
   const answer = result.answer || {};
   const issueSection = issueHits.length
     ? issueHits.map((hit, index) => renderHit(hit, index, query, false)).join("")
@@ -2106,8 +2203,14 @@ function renderSearch(result, query) {
   const english = state.locale === "en";
   const summary = $("#search-summary");
   const method = { bm25: "BM25", vector: "dense vector", hybrid: `RRF hybrid · k=${result.query.rank_constant}` }[result.mode] || "검색";
-  summary.innerHTML = `<strong>${Number(result.total).toLocaleString()}</strong>${english ? " documents matched" : "개 문서 일치"} <span>·</span><span>${method}</span><span>·</span><span>${english ? "Elapsed" : "실행 시간"} ${escapeHtml(result.took_ms ?? "—")} ms</span><span class="spacer"></span><span>${english ? "Query details" : "질의 분석"}</span><details><summary>DSL</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.query, null, 2))}</pre></details>${scoreGuidance(result.mode)}`;
+  summary.innerHTML = `<strong>${Number(result.total).toLocaleString()}</strong>${english ? " documents matched" : "개 문서 일치"} <span>·</span><span>${method}</span><span>·</span><span>${english ? "Final top-K" : "최종 Top-K"} ${escapeHtml(state.lastSearch?.size ?? "—")} · ${english ? "Candidate pool" : "후보 풀"} ${escapeHtml(state.lastSearch?.candidate_pool ?? "—")}</span><span>·</span><span>${english ? "Elapsed" : "실행 시간"} ${escapeHtml(result.took_ms ?? "—")} ms</span><span class="spacer"></span><span>${english ? "Query details" : "질의 분석"}</span><details><summary>DSL</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.query, null, 2))}</pre></details>${scoreGuidance(result.mode)}`;
   summary.classList.remove("hidden");
+  if (result.reranker) {
+    const meta = document.createElement("p");
+    meta.className = "reranker-summary";
+    meta.textContent = (english ? "Reranker" : "재순위화") + " · " + String(result.reranker.model || "—") + " · " + String(result.reranker.revision || "—") + " · " + String(result.reranker.runtime || "—") + " / " + String(result.reranker.device || "—") + " · max length " + String(result.reranker.max_length ?? "—") + " · " + String(result.reranker.elapsed_ms ?? "—") + " ms · " + String(result.reranker.candidate_count ?? "—") + " candidates · " + String(result.reranker.score_interpretation || (english ? "raw diagnostic score, not probability" : "진단용 원점수, 확률 아님"));
+    summary.append(meta);
+  }
   const sharedUnavailable = result.shared_search?.state === "unavailable";
   const sharedHtml = sharedUnavailable
     ? `<div class="notice notice-muted">${escapeHtml(english ? "Shared-index search is unavailable. Check search permissions and readiness." : result.shared_search.message || "공유 인덱스 검색을 사용할 수 없습니다.")}</div>`
@@ -2178,12 +2281,14 @@ function renderHit(hit, index, query, allowMappedTitle = false) {
   const components = Array.isArray(source.components) ? source.components : source.components ? [source.components] : [];
   const comments = hit.inner_hits?.comments?.hits?.hits || [];
   const commentHtml = comments.slice(0, 2).map((comment) => `<div class="hit-section"><strong>${english ? "Matching comment" : "댓글 매치"}</strong>${escapeHtml(comment._source?.body || "")}</div>`).join("");
-  const scoreLabel = state.lastSearch?.result?.mode === "hybrid" ? "RRF SCORE" : state.lastSearch?.result?.mode === "vector" ? "VECTOR SCORE" : "BM25 SCORE";
-  const componentScores = hit.retrieval_scores ? `<div class="hit-section"><strong>${english ? "Raw scores" : "원점수"}</strong>BM25 ${hit.retrieval_scores.bm25 == null ? "—" : formatNumber(hit.retrieval_scores.bm25, 4)} · Vector ${hit.retrieval_scores.vector == null ? "—" : formatNumber(hit.retrieval_scores.vector, 4)}</div>` : "";
+  const scoreLabel = `${state.lastSearch?.result?.mode === "hybrid" ? "RRF SCORE" : state.lastSearch?.result?.mode === "vector" ? "VECTOR SCORE" : "BM25 SCORE"} · ${english ? "RAW DIAGNOSTIC" : "원점수 진단"}`;
+  const componentScores = hit.retrieval_scores ? `<div class="hit-section"><strong>${english ? "Raw diagnostic scores (not probabilities)" : "진단용 원점수 (확률 아님)"}</strong>BM25 ${hit.retrieval_scores.bm25 == null ? "—" : formatNumber(hit.retrieval_scores.bm25, 4)} · Vector ${hit.retrieval_scores.vector == null ? "—" : formatNumber(hit.retrieval_scores.vector, 4)}${hit.rrf_score != null ? ` · RRF ${formatNumber(hit.rrf_score, 4)}` : ""}</div>` : "";
   const highlightHtml = renderResultHighlights(hit.highlight, state.lastSearch?.result?.mode, hit.retrieval_scores);
+  const provenanceHtml = renderSearchHitProvenance(hit, documentIndex, index, english);
   return `<article class="hit-card" data-hit-id="${escapeHtml(hit._id)}" data-hit-index="${escapeHtml(documentIndex)}">
     <div class="hit-head"><div class="hit-title-wrap"><span class="issue-key">${escapeHtml(issueKey)}</span><h3 class="hit-title">${escapeHtml(displayTitle)}</h3></div><div class="score-box"><div class="score-label">${scoreLabel} · #${index + 1}</div><div class="score-value">${formatNumber(hit._score, 4)}</div></div></div>
     <div class="hit-meta">${documentIndex !== selectedIndex ? `<span class="meta-chip">${escapeHtml(documentIndex)}</span>` : ""}${source.status ? `<span class="meta-chip">${escapeHtml(source.status)}</span>` : ""}${source.priority ? `<span class="meta-chip">${escapeHtml(source.priority)}</span>` : ""}${components.map((item) => `<span class="meta-chip">${escapeHtml(item)}</span>`).join("")}</div>
+    ${provenanceHtml}
     ${source.error_signature ? `<div class="hit-section"><strong>Error</strong>${escapeHtml(source.error_signature)}</div>` : ""}
     ${source.root_cause ? `<div class="hit-section"><strong>Root cause</strong>${escapeHtml(source.root_cause)}</div>` : ""}
     ${componentScores}
@@ -2191,6 +2296,45 @@ function renderHit(hit, index, query, allowMappedTitle = false) {
     ${commentHtml}
     <div class="hit-actions"><button data-stage-ai-result="" data-index="${escapeHtml(documentIndex)}">${english ? "Ask AI about this result" : "AI 도우미에게 이 결과 묻기"}</button><button data-open-document="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">${english ? "Document and chunk lab" : "문서 · 청크 랩"}</button>${state.lastSearch?.result?.mode !== "vector" ? `<button data-explain="${escapeHtml(hit._id)}" data-index="${escapeHtml(documentIndex)}">${english ? (state.lastSearch?.result?.mode === "hybrid" ? "Explain BM25 score" : "Explain score") : state.lastSearch?.result?.mode === "hybrid" ? "BM25 점수 설명" : "점수 설명"}</button>` : ""}${source.source_url ? `<a href="${escapeHtml(source.source_url)}" target="_blank" rel="noreferrer">${english ? "Source ↗" : "원본 ↗"}</a>` : ""}</div>
   </article>`;
+}
+
+function renderSearchHitProvenance(hit, documentIndex, displayRank, english) {
+  const ranks = hit.retrieval_ranks || hit.lane_ranks || hit.laneRanks || {};
+  const scores = hit.retrieval_scores || {};
+  const rawLanes = hit.retrieval_lanes || hit.lanes || hit.provenance?.lanes;
+  const laneEntries = Array.isArray(rawLanes) ? rawLanes.map((item) => [item.name || item.lane || "lane", item]) : Object.entries(rawLanes || { ...ranks, ...scores });
+  if (!laneEntries.length) laneEntries.push([state.lastSearch?.result?.mode || "search", {}]);
+  const wrapper = document.createElement("div");
+  wrapper.className = "hit-section retrieval-provenance";
+  const heading = document.createElement("strong");
+  heading.textContent = english ? "Lane evidence · concrete index/path" : "lane 근거 · 구체 인덱스/경로";
+  wrapper.append(heading);
+  const identity = document.createElement("span");
+  identity.textContent = String(documentIndex) + " / " + String(hit._id ?? "—");
+  wrapper.append(identity);
+  const list = document.createElement("ul");
+  for (const [name, item] of laneEntries) {
+    const lane = typeof item === "object" && item ? item : {};
+    const rank = lane.rank ?? lane.original_rank ?? ranks[name] ?? hit.rank ?? displayRank + 1;
+    const score = lane.raw_score ?? lane.score ?? (name === "rrf" ? hit.rrf_score : scores[name]);
+    const li = document.createElement("li");
+    li.textContent = String(name) + " · " + (english ? "rank" : "순위") + " #" + String(rank) + " · " + (english ? "raw diagnostic score" : "진단용 원점수") + " " + (score == null ? "—" : formatNumber(score, 4));
+    list.append(li);
+  }
+  wrapper.append(list);
+  const rerank = hit.reranker_evidence || hit.reranker || hit.rerank_evidence || (hit.rerank && typeof hit.rerank === "object" ? hit.rerank : {});
+  const before = rerank.before_rank ?? hit.rank_before_rerank ?? hit.original_rank;
+  const after = rerank.after_rank ?? hit.reranked_rank ?? hit.rerank_rank;
+  const rerankScore = rerank.raw_score ?? rerank.score ?? hit.reranker_score;
+  const model = rerank.model || rerank.model_name || hit.reranker_model;
+  const elapsed = rerank.elapsed_ms ?? rerank.took_ms ?? hit.reranker_elapsed_ms;
+  if (before != null || after != null || rerankScore != null || model || elapsed != null) {
+    const evidence = document.createElement("p");
+    evidence.className = "reranker-evidence";
+    evidence.textContent = (english ? "Rerank" : "재순위화") + " · " + (english ? "before" : "전") + " #" + String(before ?? "—") + " · " + (english ? "after" : "후") + " #" + String(after ?? "—") + " · " + (english ? "raw model score (not probability)" : "모델 원점수 (확률 아님)") + " " + (rerankScore == null ? "—" : formatNumber(rerankScore, 4)) + " · " + (english ? "model" : "모델") + " " + String(model || "—") + " · " + (english ? "time" : "시간") + " " + String(elapsed ?? "—") + " ms · " + (english ? "truncated " : "잘림 ") + String(rerank.truncated ?? "unknown");
+    wrapper.append(evidence);
+  }
+  return wrapper.outerHTML;
 }
 
 function renderAiContextReadouts() {
@@ -4766,6 +4910,7 @@ function init() {
   fetch("/api/health", { cache: "no-store" }).then((response) => response.json()).then((result) => { $("#server-version").textContent = `v${result.version}`; }).catch(() => {});
   refreshCodebaseStatus();
   loadEmbeddingProfiles();
+  loadRerankerStatus();
 
   $$(".tab").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
   activateTab("concept-panel");
@@ -4811,6 +4956,12 @@ function init() {
     setConnectionStatus("idle", "새 주소에서 다시 연결하세요");
   });
   $("#search-button").addEventListener("click", runSearch);
+  $("#reranker-consent").addEventListener("change", renderRerankerStatus);
+  $("#reranker-prepare").addEventListener("click", prepareReranker);
+  $("#reranker-enabled").addEventListener("change", renderRerankerStatus);
+  $("#search-size").addEventListener("change", syncSearchBounds);
+  $("#candidate-pool").addEventListener("input", syncSearchBounds);
+  $("#candidate-pool").addEventListener("change", syncSearchBounds);
   $("#embedding-profile-select").addEventListener("change", () => {
     state.sharedProfileId = $("#embedding-profile-select").value;
     $("#embedding-profile-select").dataset.touched = "true";

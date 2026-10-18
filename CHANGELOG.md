@@ -2,6 +2,14 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.12.0] - 2026-10-19
+
+- Give BM25, vector, and hybrid search one bounded candidate-pool and final top-K interface, while preserving filters, embedding profiles, and concrete alias document identity.
+- Return per-lane original ranks and raw scores, plus separate RRF rank/score evidence; nested comment matches and lexical highlights remain attached.
+- Add an optional CPU cross-encoder reranker with a pinned multilingual model, explicit download consent, local-only search loading, and before/after rank evidence.
+- Label scores as uncalibrated diagnostics rather than relevance probabilities; normal search remains available without the optional reranker runtime.
+- Add Korean/English controls and include the R07 mock-only browser fixture in the standard browser smoke command.
+
 ## [1.11.0] - 2026-10-19
 
 - Add versioned local E5 and multilingual MiniLM embedding profiles with visible recipe details and cache readiness.

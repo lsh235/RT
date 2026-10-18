@@ -6,7 +6,7 @@ Elasticsearch에 저장된 문서를 직접 검색하고, 검색 결과와 근�
 
 ## 개발 완료 목표
 
-현재 구현 작업 기준은 **R06 / v1.11.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
+현재 구현 작업 기준은 **R07 / v1.12.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
 
 ## 빠른 시작
 
@@ -86,6 +86,8 @@ docker run --name es-rag-local --detach \
 
 로컬 임베딩을 사용하려면 선택 패키지를 설치합니다. 설치만으로 모델 파일을 받지는 않습니다. E5(`intfloat/multilingual-e5-large`, 1024차원)와 multilingual MiniLM(`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384차원)을 선택할 수 있으며, 앱은 선택한 모델의 캐시 준비 상태와 레시피를 표시합니다. 캐시되지 않은 모델을 받을 때는 동의 안내와 예상 다운로드를 확인하세요. 프로필이 다른 기존 벡터는 선택한 모델과 호환된다고 가정하지 않습니다. 문서 임베딩은 선택 인덱스의 `rag_embedding` 필드를 부분 업데이트하므로 인덱스와 권한을 먼저 확인해야 합니다. 자세한 계약과 검증 범위는 [API 계약](docs/api-contract.md) 및 [v1.11.0 acceptance](docs/acceptance/v1.11.0.md)를 참고하세요.
 
+BM25, 벡터, RRF 하이브리드 검색은 후보 풀과 최종 Top-K를 따로 설정합니다. 결과에는 구체 인덱스/문서 ID, lane별 순위와 원점수, RRF 및 재순위화 근거가 표시됩니다. 각 점수는 보정되지 않은 진단값이며 관련도 확률이 아닙니다. 선택형 로컬 재순위화를 사용하려면 `.venv/bin/python -m pip install -e '.[reranker]'`로 추가 패키지를 설치하고, 화면에서 동의한 뒤 고정된 BAAI/bge-reranker-v2-m3 모델 파일(약 2.3 GB)을 준비합니다. 일반 검색은 이 모델을 다운로드하지 않습니다. 재순위화를 켰는데 런타임이나 캐시가 준비되지 않은 경우 요청은 명시적 오류로 끝납니다. 이 통합만으로 검색 품질 향상을 주장하지 않습니다. 자세한 내용은 [v1.12.0 acceptance](docs/acceptance/v1.12.0.md)와 [API 계약](docs/api-contract.md)을 참고하세요.
+
 ```bash
 .venv/bin/python -m pip install -e '.[semantic]'
 ```
@@ -154,6 +156,7 @@ Elasticsearch 주소, 인덱스와 인증 정보를 브라우저에서 입력합
 | 개인 지식 라이브러리와 벡터 동기화 | [API](docs/cycle38-private-knowledge-api.md), [벡터 설계](docs/cycle43-private-vector-design.md), [Cycle 43 acceptance](docs/cycle43-acceptance.md) |
 | 청크 정책과 복구 가능한 재색인 | [API와 저장 계약](docs/api-contract.md), [v1.10.0 R05 acceptance](docs/acceptance/v1.10.0.md) |
 | 임베딩 프로필과 벡터 호환성 | [API와 저장 계약](docs/api-contract.md), [v1.11.0 R06 acceptance](docs/acceptance/v1.11.0.md) |
+| BM25/vector/RRF 비교, 결과 경로와 선택형 로컬 재순위화 | [API 계약](docs/api-contract.md), [v1.12.0 R07 acceptance](docs/acceptance/v1.12.0.md) |
 | 실험 비교와 내보내기 | [비교 연구](docs/experiment-comparison-research.md), [내보내기 연구](docs/experiment-export-research.md), [내보내기 acceptance](docs/experiment-export-acceptance.md) |
 
 ## 문제 해결

@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import quote
 
 from . import embeddings
+from . import reranker as local_reranker
 from .es_client import (
     Connection,
     ElasticsearchError,
@@ -254,6 +255,7 @@ def _rrf(
                 entry = {**hit, "retrieval_scores": {"bm25": None, "vector": None}, "_rrf_score": 0.0}
                 merged[identity] = entry
             entry["retrieval_scores"][source_name] = hit.get("_score")
+            entry[f"_{source_name}_rank"] = rank
             entry["_rrf_score"] += 1.0 / (rank_constant + rank)
             if source_name == "bm25":
                 # Keep comment inner hits and lexical highlights when present.
@@ -262,10 +264,16 @@ def _rrf(
                     entry["inner_hits"] = hit["inner_hits"]
                 if hit.get("highlight"):
                     entry["highlight"] = hit["highlight"]
-    ordered = sorted(merged.values(), key=lambda hit: hit["_rrf_score"], reverse=True)[:size]
-    for hit in ordered:
+    ordered = sorted(merged.values(), key=lambda hit: hit["_rrf_score"], reverse=True)
+    for rank, hit in enumerate(ordered, start=1):
+        hit["retrieval_ranks"] = {
+            "bm25": hit.pop("_bm25_rank", None),
+            "vector": hit.pop("_vector_rank", None),
+            "rrf": rank,
+        }
+        hit["rrf_score"] = hit["_rrf_score"]
         hit["_score"] = hit.pop("_rrf_score")
-    return ordered
+    return ordered[:size]
 
 
 def search(
@@ -280,11 +288,17 @@ def search(
     rank_constant: int = 60,
     source_fields: list[str] | None = None,
     profile_id: str | None = None,
+    candidate_pool: int | None = None,
+    rerank: bool = False,
 ) -> dict[str, Any]:
     index = validate_index(index)
     if mode not in {"bm25", "vector", "hybrid"}:
         raise ElasticsearchError("검색 방식은 bm25, vector, hybrid 중 하나여야 합니다.")
-    rank_constant = max(1, min(200, int(rank_constant)))
+    size = _bounded_integer(size, "size", 1, 50)
+    candidate_pool = size if candidate_pool is None else _bounded_integer(candidate_pool, "candidate_pool", size, 200)
+    rank_constant = _bounded_integer(rank_constant, "rank_constant", 1, 200)
+    if not isinstance(rerank, bool):
+        raise ElasticsearchError("rerank 값은 boolean이어야 합니다.")
     source_fields = source_fields or ["issue_key", "summary", "status", "priority", "components", "error_signature", "root_cause", "workaround_or_fix", "description", "steps_to_reproduce", "comments", "rag_chunk_text", "source_url"]
 
     lexical_result: dict[str, Any] | None = None
@@ -293,11 +307,11 @@ def search(
     vector_info: dict[str, Any] | None = None
     if mode in {"bm25", "hybrid"}:
         lexical_result, lexical_info = _lexical_search(
-            connection, index, query_text, size, boosts, filters, source_fields
+            connection, index, query_text, candidate_pool, boosts, filters, source_fields
         )
     if mode in {"vector", "hybrid"}:
         vector_result, vector_info = _vector_search(
-            connection, index, query_text, size, filters, source_fields, profile_id
+            connection, index, query_text, candidate_pool, filters, source_fields, profile_id
         )
 
     if mode == "bm25":
@@ -305,19 +319,31 @@ def search(
         hits = _hits(result)
         total = result.get("hits", {}).get("total", {}).get("value", len(hits))
         took = int(result.get("took", 0) or 0)
+        for rank, hit in enumerate(hits, start=1):
+            hit["retrieval_ranks"] = {"bm25": rank, "vector": None, "rrf": None}
+            hit["retrieval_scores"] = {"bm25": hit.get("_score"), "vector": None}
     elif mode == "vector":
         result = vector_result or {}
         hits = _hits(result)
         total = result.get("hits", {}).get("total", {}).get("value", len(hits))
         took = int(result.get("took", 0) or 0)
+        for rank, hit in enumerate(hits, start=1):
+            hit["retrieval_ranks"] = {"bm25": None, "vector": rank, "rrf": None}
+            hit["retrieval_scores"] = {"bm25": None, "vector": hit.get("_score")}
     else:
         left = lexical_result or {}
         right = vector_result or {}
         left_hits = _hits(left)
         right_hits = _hits(right)
-        hits = _rrf(left_hits, right_hits, rank_constant, size)
+        hits = _rrf(left_hits, right_hits, rank_constant, candidate_pool)
         total = len({(str(hit.get("_index") or ""), str(hit.get("_id", ""))) for hit in left_hits + right_hits})
         took = int(left.get("took", 0) or 0) + int(right.get("took", 0) or 0)
+
+    reranker_info = None
+    if rerank:
+        hits, reranker_info = local_reranker.rerank(query_text, hits, size)
+    else:
+        hits = hits[:size]
 
     return {
         "query": {
@@ -325,13 +351,26 @@ def search(
             "lexical": lexical_info["query"] if lexical_info else None,
             "knn": vector_info,
             "rank_constant": rank_constant if mode == "hybrid" else None,
+            "size": size,
+            "candidate_pool": candidate_pool,
+            "boosts": boosts,
+            "profile_id": profile_id if mode in {"vector", "hybrid"} else None,
+            "filters": filters or [],
+            "rerank": rerank,
         },
         "mode": mode,
         "took_ms": took,
         "total": total,
         "hits": hits,
+        "reranker": reranker_info,
         "vector_count": count_vectors(connection, index) if mode in {"vector", "hybrid"} else None,
         "embedding_profile": ({"profile_id": vector_info["profile_id"], "model_name": vector_info["model"],
                                "dimensions": vector_info["dimensions"], "recipe": vector_info["recipe"]}
                               if vector_info else None),
     }
+
+
+def _bounded_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < minimum or value > maximum:
+        raise ElasticsearchError(f"{name} 값은 {minimum}~{maximum} 사이 정수여야 합니다.")
+    return value

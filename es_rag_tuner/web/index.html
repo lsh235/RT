@@ -14,7 +14,7 @@
       <span class="brand-mark">ES</span>
       <span><strong>Retrieval Workbench</strong><small>Elasticsearch · RAG quality lab</small></span>
     </a>
-  <div class="top-meta"><label class="language-control" for="ui-language">Language</label><select id="ui-language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.11.0</span></div>
+  <div class="top-meta"><label class="language-control" for="ui-language">Language</label><select id="ui-language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.12.0</span></div>
   </header>
 
   <main id="auth-screen" class="auth-screen" aria-labelledby="auth-title">
@@ -180,7 +180,17 @@
         <div class="search-box card">
           <label class="field-label" for="search-query" data-i18n="searchQuery">검색 질의</label>
           <div class="search-row"><textarea id="search-query" rows="2" placeholder="예: 느린 네트워크에서 keepalive watchdog timeout이 발생하는 원인은?"></textarea><button id="search-button" class="button button-primary search-submit" disabled><span data-i18n="searchButton">검색</span><kbd>↵</kbd></button></div>
-          <div class="search-options"><label>검색 방식 <select id="search-mode"><option value="bm25">BM25</option><option value="vector">벡터</option><option value="hybrid">하이브리드 (RRF)</option><option value="code_rag">코드 + Jira RAG</option></select></label><label>결과 수 <select id="search-size"><option>5</option><option selected>10</option><option>20</option><option>50</option></select></label><label id="rank-constant-wrap" class="hidden">RRF 상수 <input id="rank-constant" class="compact-number" type="number" min="1" max="200" value="60"></label><button id="filter-toggle" class="text-button">+ 메타데이터 필터</button></div>
+          <div class="search-options"><label for="search-mode" data-i18n="searchModeLabel">검색 방식</label><select id="search-mode"><option value="bm25">BM25</option><option value="vector">벡터</option><option value="hybrid">하이브리드 (RRF)</option><option value="code_rag">코드 + Jira RAG</option></select><label for="search-size" data-i18n="topKLabel">최종 Top-K</label><input id="search-size" class="compact-number" type="number" min="1" max="50" value="10" inputmode="numeric" aria-describedby="top-k-help"><label for="candidate-pool" data-i18n="candidatePoolLabel">후보 수집 풀</label><input id="candidate-pool" class="compact-number" type="number" min="10" max="200" value="50" inputmode="numeric" aria-describedby="candidate-pool-help"><label id="rank-constant-wrap" class="hidden" for="rank-constant">RRF 상수 <input id="rank-constant" class="compact-number" type="number" min="1" max="200" value="60"></label><button id="filter-toggle" class="text-button">+ 메타데이터 필터</button></div>
+          <p id="top-k-help" class="helper-text" data-i18n="topKHelp">최종 표시 결과 수 · 1–50</p><p id="candidate-pool-help" class="helper-text" data-i18n="candidatePoolHelp">검색 후보 수 · 최소 최종 Top-K, 최대 200</p>
+          <section class="reranker-panel" aria-labelledby="reranker-title">
+            <div class="reranker-heading"><h3 id="reranker-title" data-i18n="rerankerTitle">선택형 로컬 재순위화</h3><span class="label-chip" data-i18n="rerankerOptional">선택 사항</span></div>
+            <p class="helper-text" data-i18n="rerankerIntro">로컬 cross-encoder는 명시적으로 준비한 뒤에만 사용할 수 있습니다. 일반 검색은 모델을 내려받지 않습니다.</p>
+            <p id="reranker-status" class="reranker-status notice notice-muted" role="status" aria-live="polite" data-state="loading" data-i18n="rerankerLoading">재순위화 준비 상태 확인 중…</p>
+            <label class="reranker-consent"><input id="reranker-consent" type="checkbox"><span data-i18n="rerankerConsent">모델 파일 다운로드에 동의합니다 (약 2.3 GB).</span></label>
+            <button id="reranker-prepare" type="button" class="button button-secondary button-small" disabled data-i18n="rerankerPrepare">동의 후 모델 준비 및 다운로드</button>
+            <label class="reranker-enable"><input id="reranker-enabled" type="checkbox" disabled><span data-i18n="rerankerEnable">검색 후보 재순위화 사용</span></label>
+            <p class="helper-text" data-i18n="rerankerScoreNote">모델·BM25·벡터·RRF 점수는 보정되지 않은 진단용 원점수이며 확률이 아닙니다.</p>
+          </section>
           <div id="search-mode-readiness" class="notice notice-muted hidden" role="status" aria-live="polite" aria-atomic="true"></div>
           <button type="button" class="button button-secondary button-small hidden" data-open-embedding-setup>임베딩 상태 자세히 보기</button>
           <div id="filter-row" class="filter-row hidden"><select id="filter-field"><option value="issue_type">유형</option><option value="status">상태</option><option value="priority">우선순위</option><option value="components">컴포넌트</option><option value="labels">라벨</option><option value="language">언어</option><option value="issue_key">이슈 키</option><option value="project.key">프로젝트</option></select><input id="filter-value" class="text-input" placeholder="정확히 일치하는 필터 값"><button id="add-filter" class="button button-small">필터 추가</button></div>
