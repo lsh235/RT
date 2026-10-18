@@ -48,17 +48,18 @@ try {
   if (!response?.ok()) throw new Error(`home page returned HTTP ${response?.status()}`);
   const initialHtml = await response.text();
   const initialVersion = initialHtml.match(/id="server-version">([^<]+)</)?.[1];
-  if (initialVersion !== 'v1.13.0') throw new Error(`static UI version was ${initialVersion || 'missing'}, expected v1.13.0`);
+  if (!initialVersion) throw new Error('static UI version was missing');
   const health = await page.evaluate(async () => {
     const healthResponse = await fetch('/api/health', { cache: 'no-store' });
     if (!healthResponse.ok) throw new Error(`health endpoint returned HTTP ${healthResponse.status}`);
     return healthResponse.json();
   });
-  if (health.version !== '1.13.0') throw new Error(`health version was ${health.version}, expected 1.13.0`);
+  if (typeof health.version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(health.version)) throw new Error(`health version was invalid: ${health.version}`);
+  if (initialVersion !== `v${health.version}`) throw new Error(`static UI version ${initialVersion} did not match health version ${health.version}`);
   await page.locator('body').waitFor();
-  await page.waitForFunction(() => document.querySelector('#server-version')?.textContent === 'v1.13.0');
+  await page.waitForFunction(version => document.querySelector('#server-version')?.textContent === `v${version}`, health.version);
   const displayedVersion = await page.locator('#server-version').textContent();
-  if (displayedVersion !== 'v1.13.0') throw new Error(`rendered UI version was ${displayedVersion}, expected v1.13.0`);
+  if (displayedVersion !== `v${health.version}`) throw new Error(`rendered UI version was ${displayedVersion}, expected v${health.version}`);
   const title = await page.title();
   if (!title) throw new Error('home page has no title');
   console.log(JSON.stringify({ ok: true, title, python, initial_version: initialVersion, health_version: health.version, displayed_version: displayedVersion, url: `http://127.0.0.1:${port}/` }));

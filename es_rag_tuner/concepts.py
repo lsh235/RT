@@ -8,6 +8,7 @@ import math
 import os
 import re
 import sqlite3
+import time
 import uuid
 from contextvars import ContextVar
 from contextlib import contextmanager
@@ -434,9 +435,10 @@ def ensure_query(concept_id: str, query_text: str, split: str = "train") -> dict
         return {"concept_id": concept_id, "query_id": query_id, "query": query_text, "split": split, "version_id": save_result["version_id"]}
 
 
-def corpus_schema(connection: Connection, index: str) -> dict[str, Any]:
+def corpus_schema(connection: Connection, index: str, *, timeout: float | None = None) -> dict[str, Any]:
     index = validate_index(index)
-    mapping_response = request(connection, "GET", f"{quote(index, safe='')}/_mapping")
+    request_options = {"timeout": timeout} if timeout is not None else {}
+    mapping_response = request(connection, "GET", f"{quote(index, safe='')}/_mapping", **request_options)
     mappings = [value.get("mappings", {}) for value in mapping_response.values() if isinstance(value, dict)]
     if not mappings:
         mappings = [mapping_response.get(index, {}).get("mappings", {})]
@@ -651,9 +653,10 @@ def diagnose(connection: Connection, concept_value: Any, query: str = "", query_
     return {"document_index": index, "document_id": document_id, "query_id": query_id or None, "classification": classification, "probes": probes, "selected_field_presence": selected_presence, "next_steps": next_steps, "warnings": warnings, "warning_codes": list(dict.fromkeys(warning_codes))}
 
 
-def _index_identity(connection: Connection, index: str) -> tuple[dict[str, Any], str | None]:
+def _index_identity(connection: Connection, index: str, *, timeout: float | None = None) -> tuple[dict[str, Any], str | None]:
     try:
-        result = request(connection, "GET", f"{quote(index, safe='')}/_settings?filter_path=*.settings.index.uuid")
+        request_options = {"timeout": timeout} if timeout is not None else {}
+        result = request(connection, "GET", f"{quote(index, safe='')}/_settings?filter_path=*.settings.index.uuid", **request_options)
     except ElasticsearchError:
         return {"requested_index": index, "uuids": [], "available": False}, "Elasticsearch index UUID was unavailable; run history cannot detect index recreation from UUID."
     identities = []
@@ -666,8 +669,8 @@ def _index_identity(connection: Connection, index: str) -> tuple[dict[str, Any],
     return {"requested_index": index, "uuids": identities, "available": True}, None
 
 
-def _validate_search_fields(connection: Connection, concept: dict[str, Any]) -> dict[str, Any]:
-    schema = corpus_schema(connection, concept["corpus"]["index"])
+def _validate_search_fields(connection: Connection, concept: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+    schema = corpus_schema(connection, concept["corpus"]["index"], timeout=timeout)
     by_name = {field["name"]: field for field in schema["fields"]}
     for name in concept["corpus"]["text_fields"]:
         field = by_name.get(name)
@@ -1015,12 +1018,13 @@ def _evidence(source: dict[str, Any], concept: dict[str, Any] | None, *, include
     return snippet[:600], evidence
 
 
-def _hits(connection: Connection, index: str, query: str, size: int, concept: dict[str, Any], *, expanded: bool = True, filters: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _hits(connection: Connection, index: str, query: str, size: int, concept: dict[str, Any], *, expanded: bool = True, filters: list[dict[str, Any]] | None = None, timeout: float | None = None) -> dict[str, Any]:
     query_body = _make_query(query, concept, expanded=expanded)
     if filters:
         query_body["bool"]["filter"] = _filter_clauses(concept, filters)
     body = {"size": size, "track_total_hits": True, "_source": True, "query": query_body}
-    result = request(connection, "POST", f"{quote(index, safe='')}/_search", body)
+    request_options = {"timeout": timeout} if timeout is not None else {}
+    result = request(connection, "POST", f"{quote(index, safe='')}/_search", body, **request_options)
     response_hits = result.get("hits", {})
     raw_hits = response_hits.get("hits", [])
     hits = []
@@ -1667,12 +1671,133 @@ def _graded_metrics(rankings: dict[str, list[str]], judgments: list[dict[str, An
     return {"k": k, "query_count": len(rows), "judged_count": sum(row["judged_count"] for row in rows), "positive_judged_count": sum(row["positive_judged_count"] for row in rows), "relevant_found_at_k": sum(row["relevant_found_at_k"] for row in rows), "queries_with_positive_judgments": sum(row["positive_judged_count"] > 0 for row in rows), "queries_with_relevant_found": sum(row["relevant_found_at_k"] > 0 for row in rows), "explicit_unjudged_count": sum(explicit_unjudged.values()), "retrieved_judged_count": sum(row["retrieved_judged_count"] for row in rows), "unjudged_retrieved_count": sum(row["unjudged_retrieved_count"] for row in rows), "ndcg_at_k": sum(row["ndcg_at_k"] for row in rows) / len(rows) if rows else 0.0, "judged_coverage_at_k": sum(row["judged_coverage_at_k"] for row in rows) / len(rows) if rows else 0.0, "recall_of_judged_relevant_at_k": sum(row["recall_of_judged_relevant_at_k"] for row in rows) / len(rows) if rows else 0.0, "queries": rows}
 
 
-def tune(connection: Connection, concept_value: Any, passes: Any = 2) -> dict[str, Any]:
+TUNE_ALGORITHM_VERSION = "bounded-validation-selection-v1"
+TUNE_MAX_CANDIDATES = 30
+TUNE_MAX_SECONDS = 600
+
+
+class _TuneTimeBudgetExpired(Exception):
+    pass
+
+
+def _tune_candidates(base_settings: dict[str, Any], train_query_ids: list[str], limit: int) -> tuple[list[dict[str, Any]], bool]:
+    """Return a stable train-independent configuration grid with baseline first.
+
+    The train IDs are intentionally the only split information accepted here;
+    validation and any possible held-out split cannot affect candidate order.
+    """
+    del train_query_ids  # eligibility is checked by tune before calling this helper
+    axes: dict[str, list[float]] = {}
+    for key in ("concept_weight", "related_weight"):
+        current = float(base_settings.get(key, 1.0))
+        axes[key] = sorted({0.0, 1.0, *(max(0.0, min(20.0, current * factor)) for factor in (0.5, 0.75, 1.0, 1.5, 2.0))})
+    generated: dict[str, dict[str, Any]] = {}
+    for concept_weight in axes["concept_weight"]:
+        for related_weight in axes["related_weight"]:
+            item = {**base_settings, "concept_weight": concept_weight, "related_weight": related_weight}
+            key = json.dumps(item, sort_keys=True, separators=(",", ":"), allow_nan=False)
+            generated[key] = item
+    baseline_key = json.dumps(base_settings, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    ordered = [dict(base_settings)]
+    ordered.extend(generated[key] for key in sorted(generated) if key != baseline_key)
+    return ordered[:limit], len(ordered) > limit
+
+
+def _validation_diagnostics(baseline: dict[str, Any] | None, selected: dict[str, Any] | None,
+                            judgments: list[dict[str, Any]], query_map: dict[str, dict[str, Any]],
+                            baseline_rankings: dict[str, list[str]], selected_rankings: dict[str, list[str]],
+                            k: int, *, failure: str | None = None) -> list[dict[str, Any]]:
+    val_ids = {qid for qid, query in query_map.items() if query.get("split") == "validation"}
+    val_judgments = [row for row in judgments if row.get("query_id") in val_ids and not row.get("stale")]
+    explicit_unjudged = {(row["query_id"], _metric_document_key(row["document_index"], row["document_id"]))
+                         for row in val_judgments if row.get("rating") is None}
+    by_query: dict[str, dict[str, int]] = {}
+    for row in val_judgments:
+        if row.get("rating") is not None:
+            by_query.setdefault(row["query_id"], {})[_metric_document_key(row["document_index"], row["document_id"])] = int(row["rating"])
+    baseline_rows = {row.get("query_id"): row for row in (baseline or {}).get("queries", [])}
+    selected_rows = {row.get("query_id"): row for row in (selected or {}).get("queries", [])}
+
+    def document_refs(keys: set[str], grades: dict[str, int]) -> list[dict[str, Any]]:
+        items = []
+        for key in sorted(keys):
+            index, document_id = json.loads(key)
+            items.append({"document_index": index, "document_id": document_id, "rating": grades.get(key)})
+        return items
+
+    def unjudged_count(qid: str, ranked: list[str], grades: dict[str, int]) -> int:
+        # Both explicit-unjudged and absent judgments are unknown evidence.
+        return sum(doc not in grades or (qid, doc) in explicit_unjudged for doc in ranked)
+
+    rows = []
+    for qid in sorted(val_ids):
+        query = query_map[qid]
+        grades = by_query.get(qid, {})
+        relevant = {doc for doc, grade in grades.items() if grade > 0}
+        before = baseline_rankings.get(qid, [])[:k]
+        after = selected_rankings.get(qid, [])[:k]
+        before_found, after_found = relevant & set(before), relevant & set(after)
+        b_metrics, s_metrics = baseline_rows.get(qid, {}), selected_rows.get(qid, {})
+        metric_deltas = {}
+        for metric in ("ndcg_at_k", "judged_coverage_at_k", "recall_of_judged_relevant_at_k"):
+            before_value, after_value = b_metrics.get(metric), s_metrics.get(metric)
+            metric_deltas[metric] = after_value - before_value if isinstance(before_value, (int, float)) and isinstance(after_value, (int, float)) else None
+        stale_count = sum(bool(row.get("stale")) for row in judgments if row.get("query_id") == qid)
+        time_limited = bool(failure and "time budget" in failure.casefold())
+        status = "failed" if failure and not time_limited else ("incomplete" if time_limited or not b_metrics or not s_metrics or len(grades) == 0 else "ok")
+        incomplete_categories = ["qrels_incomplete"]
+        if not grades:
+            incomplete_categories.append("no_current_validation_judgments")
+        if stale_count:
+            incomplete_categories.append("stale_judgments_excluded")
+        error_categories = ["time_budget"] if time_limited else (["validation_failed"] if failure else [])
+        rows.append({
+            "query_id": qid,
+            "query": query["query"],
+            "status": status,
+            "metric_deltas": metric_deltas,
+            "baseline_missed_known_relevant": document_refs(relevant - before_found, grades),
+            "selected_missed_known_relevant": document_refs(relevant - after_found, grades),
+            "missed_relevant_added": document_refs(before_found - after_found, grades),
+            "missed_relevant_fixed": document_refs(after_found - before_found, grades),
+            "baseline_retrieved_unjudged_count": unjudged_count(qid, before, grades),
+            "selected_retrieved_unjudged_count": unjudged_count(qid, after, grades),
+            "stale_judgment_count": stale_count,
+            "incomplete_categories": incomplete_categories,
+            "error_categories": error_categories,
+            "errors": [failure] if failure else [],
+            "qrels_limit": "Known-relevant judged targets only; absent and explicit-unjudged documents are unknown, not nonrelevant.",
+        })
+    return rows
+
+
+def tune(connection: Connection, concept_value: Any, passes: Any = 2, *, max_candidates: Any = 30,
+         time_budget_seconds: Any = 600, _clock: Any = None) -> dict[str, Any]:
+    max_candidates = _bounded_int(max_candidates, 1, TUNE_MAX_CANDIDATES, "max_candidates")
+    time_budget_seconds = _bounded_int(time_budget_seconds, 1, TUNE_MAX_SECONDS, "time_budget_seconds")
+    clock = _clock or time.monotonic
+    started = clock()
+    deadline = started + time_budget_seconds
     concept = validate_concept(concept_value)
-    _validate_search_fields(connection, concept)
-    passes = _bounded_int(passes, 1, 3, "passes")
+    def remaining_timeout() -> float:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise _TuneTimeBudgetExpired()
+        return max(0.001, min(30.0, remaining))
+    try:
+        schema = _validate_search_fields(connection, concept, timeout=remaining_timeout())
+    except _TuneTimeBudgetExpired:
+        raise ElasticsearchError("Tuning stopped with stop_reason=time_budget during mapping preflight; no candidate search ran.", 408) from None
+    except ElasticsearchError:
+        if clock() >= deadline:
+            raise ElasticsearchError("Tuning stopped with stop_reason=time_budget during mapping preflight; no candidate search ran.", 408) from None
+        raise
+    # Kept for compatibility with older clients; the deterministic finite grid
+    # supersedes pass-based coordinate iteration.
+    _bounded_int(passes, 1, 3, "passes")
     judgments = _judgments(concept["id"], concept)
     stale_count = sum(bool(row.get("stale")) for row in judgments)
+    all_judgments = judgments
     judgments = [row for row in judgments if not row.get("stale")]
     judged = [row for row in judgments if row["rating"] is not None]
     pinned_count = sum(bool(row["pinned"]) for row in judgments)
@@ -1685,17 +1810,27 @@ def tune(connection: Connection, concept_value: Any, passes: Any = 2) -> dict[st
     base_settings = dict(concept["settings"])
     metrics_cache: dict[tuple[str | None, str], dict[str, Any]] = {}
     output_cache: dict[tuple[str | None, str], dict[str, list[dict[str, Any]]]] = {}
-    def evaluate_settings(settings: dict[str, Any], split: str | None = None) -> dict[str, Any]:
+    rankings_cache: dict[tuple[str, str], dict[str, list[str]]] = {}
+    def evaluate_settings(settings: dict[str, Any], split: str) -> dict[str, Any]:
+        if clock() >= deadline:
+            raise _TuneTimeBudgetExpired()
         cache_key = (split, json.dumps(settings, sort_keys=True, separators=(",", ":")))
         if cache_key in metrics_cache:
             return metrics_cache[cache_key]
-        selected = [row for row in judgments if (split is None or query_map.get(row["query_id"], {}).get("split") == split)]
+        selected = [row for row in judgments if query_map.get(row["query_id"], {}).get("split") == split]
         rankings = {}
         output_rows: dict[str, list[dict[str, Any]]] = {}
         for query_id in sorted({row["query_id"] for row in selected}):
+            if clock() >= deadline:
+                raise _TuneTimeBudgetExpired()
             query_text = query_map[query_id]["query"]
             temp = {**concept, "settings": settings}
-            result = _hits(connection, concept["corpus"]["index"], query_text, settings["candidate_size"], temp, filters=concept["filters"])
+            remaining = deadline - clock()
+            if remaining <= 0:
+                raise _TuneTimeBudgetExpired()
+            remaining = max(0.001, min(30.0, remaining))
+            result = _hits(connection, concept["corpus"]["index"], query_text, settings["candidate_size"], temp,
+                           filters=concept["filters"], timeout=remaining)
             rankings[query_id] = [
                 _metric_document_key(hit.get("_index", concept["corpus"]["index"]), hit["_id"])
                 for hit in result["hits"]
@@ -1707,27 +1842,103 @@ def tune(connection: Connection, concept_value: Any, passes: Any = 2) -> dict[st
         metrics["coverage_policy"] = "judged_coverage_at_k and recall_of_judged_relevant_at_k report observed judged coverage separately; pins do not change organic rankings"
         metrics_cache[cache_key] = metrics
         output_cache[cache_key] = output_rows
+        rankings_cache[cache_key] = rankings
         return metrics
     train_positive_count = sum(row["rating"] > 0 for row in judged if query_map[row["query_id"]]["split"] == "train")
     if not train_positive_count:
         raise ElasticsearchError("튜닝에는 train split의 양수(1~3) graded relevance가 하나 이상 필요합니다.")
-    baseline = evaluate_settings(base_settings, "train")
+    try:
+        baseline = evaluate_settings(base_settings, "train")
+    except _TuneTimeBudgetExpired:
+        raise ElasticsearchError("Tuning stopped with stop_reason=time_budget before baseline train evaluation completed.", 408) from None
+    except ElasticsearchError:
+        if clock() >= deadline:
+            raise ElasticsearchError("Tuning stopped with stop_reason=time_budget before baseline train evaluation completed.", 408) from None
+        raise
     if not baseline["query_count"]:
         raise ElasticsearchError("튜닝에는 train split의 유효한 graded judgment가 하나 이상 필요합니다.")
-    best_settings = dict(base_settings)
-    best_metrics = baseline
-    for _ in range(passes):
-        for setting_key in ("concept_weight", "related_weight"):
-            current = best_settings[setting_key]
-            candidates = sorted({0.0, 1.0, *(max(0.0, min(20.0, current * factor)) for factor in (0.5, 0.75, 1.0, 1.5, 2.0))})
-            for candidate_value in candidates:
-                trial = {**best_settings, setting_key: candidate_value}
-                metrics = evaluate_settings(trial, "train")
-                if (metrics["ndcg_at_k"], metrics["judged_coverage_at_k"]) > (best_metrics["ndcg_at_k"], best_metrics["judged_coverage_at_k"]):
-                    best_settings, best_metrics = trial, metrics
-    validation_baseline = evaluate_settings(base_settings, "validation")
-    validation_tuned = evaluate_settings(best_settings, "validation")
-    validation_metrics = {"baseline": validation_baseline, "tuned": validation_tuned} if validation_tuned["query_count"] else None
+    train_query_ids = sorted({row["query_id"] for row in judged if query_map[row["query_id"]]["split"] == "train"})
+    candidates, candidate_truncated = _tune_candidates(base_settings, train_query_ids, max_candidates)
+    candidate_trace: list[dict[str, Any]] = []
+    candidate_rankings: dict[str, dict[str, list[str]]] = {}
+    stop_reason = "completed"
+    baseline_validation: dict[str, Any] | None = None
+    baseline_validation_error: str | None = None
+    selection = {"selected_candidate_id": "baseline", "reason": "validation_unavailable"}
+    baseline_tie_seen = False
+    for position, settings in enumerate(candidates):
+        candidate_id = "baseline" if position == 0 else f"candidate-{position:03d}"
+        entry: dict[str, Any] = {"candidate_id": candidate_id, "settings": settings, "train_metrics": None,
+                                 "validation_metrics": None, "evaluation_status": "pending"}
+        candidate_trace.append(entry)
+        try:
+            if position == 0:
+                train_metrics = baseline
+            else:
+                train_metrics = evaluate_settings(settings, "train")
+            entry["train_metrics"] = train_metrics
+            candidate_rankings[candidate_id] = rankings_cache.get(("train", json.dumps(settings, sort_keys=True, separators=(",", ":"))), {})
+            val_judged = [row for row in judged if query_map[row["query_id"]]["split"] == "validation"]
+            val_positive = any(row["rating"] > 0 for row in val_judged)
+            if not val_judged:
+                entry["evaluation_status"] = "validation_unavailable"
+                entry["validation_error"] = "no_validation_judgments"
+                if position == 0:
+                    selection = {"selected_candidate_id": "baseline", "reason": "validation_unavailable"}
+                continue
+            if not val_positive:
+                entry["evaluation_status"] = "validation_no_positive_judgments"
+                entry["validation_error"] = "no_validation_positive_judgments"
+                if position == 0:
+                    selection = {"selected_candidate_id": "baseline", "reason": "validation_unavailable"}
+                continue
+            val_metrics = evaluate_settings(settings, "validation")
+            entry["validation_metrics"] = val_metrics
+            entry["evaluation_status"] = "evaluated"
+            candidate_rankings[candidate_id] = {**candidate_rankings.get(candidate_id, {}), "validation": rankings_cache.get(("validation", json.dumps(settings, sort_keys=True, separators=(",", ":"))), {})}
+            if position == 0:
+                baseline_validation = val_metrics
+                entry["validation_metrics"] = val_metrics
+                selection = {"selected_candidate_id": "baseline", "reason": "baseline_retained_tie"}
+            elif baseline_validation is not None:
+                baseline_key = (baseline_validation["ndcg_at_k"], baseline_validation["judged_coverage_at_k"])
+                candidate_key = (val_metrics["ndcg_at_k"], val_metrics["judged_coverage_at_k"])
+                baseline_tie_seen = baseline_tie_seen or candidate_key == baseline_key
+                selected_metrics = next((row.get("validation_metrics") for row in candidate_trace if row["candidate_id"] == selection["selected_candidate_id"]), None)
+                selected_key = ((selected_metrics or {}).get("ndcg_at_k", float("-inf")),
+                                (selected_metrics or {}).get("judged_coverage_at_k", float("-inf")))
+                if candidate_key > baseline_key and candidate_key > selected_key:
+                    selection = {"selected_candidate_id": candidate_id, "reason": "candidate_selected"}
+        except _TuneTimeBudgetExpired:
+            entry["evaluation_status"] = "not_evaluated_time_budget"
+            stop_reason = "time_budget"
+            break
+        except Exception as exc:
+            if clock() >= deadline:
+                entry["evaluation_status"] = "not_evaluated_time_budget"
+                stop_reason = "time_budget"
+                break
+            entry["evaluation_status"] = "failed"
+            entry["error"] = _public_failure_message(exc, "candidate_evaluation_failed")
+            if position == 0:
+                baseline_validation_error = entry["error"]
+                selection = {"selected_candidate_id": "baseline", "reason": "validation_failed"}
+    if clock() >= deadline:
+        stop_reason = "time_budget"
+    if stop_reason != "time_budget" and candidate_truncated:
+        stop_reason = "candidate_budget"
+    incomplete_candidate = stop_reason == "time_budget" or any(row.get("evaluation_status") in {"failed", "not_evaluated_time_budget"} for row in candidate_trace)
+    if incomplete_candidate:
+        selection = {"selected_candidate_id": "baseline",
+                     "reason": "validation_unavailable" if selection["reason"] == "validation_unavailable" else "validation_failed"}
+    elif selection["selected_candidate_id"] == "baseline" and selection["reason"] not in {"validation_unavailable", "validation_failed"}:
+        selection = {"selected_candidate_id": "baseline", "reason": "baseline_retained_tie" if baseline_tie_seen else "no_candidate_improved"}
+    selected_id = selection["selected_candidate_id"]
+    selected_entry = next((row for row in candidate_trace if row["candidate_id"] == selected_id), candidate_trace[0])
+    best_settings = dict(selected_entry["settings"])
+    best_metrics = selected_entry["train_metrics"] or baseline
+    validation_tuned = selected_entry["validation_metrics"]
+    validation_metrics = {"baseline": baseline_validation, "tuned": validation_tuned} if baseline_validation and validation_tuned else None
     explicit_unjudged_count = sum(row["rating"] is None for row in judgments)
     unjudged_retrieved_count = best_metrics["unjudged_retrieved_count"]
     train_metrics = {"baseline": baseline, "tuned": best_metrics}
@@ -1737,12 +1948,40 @@ def tune(connection: Connection, concept_value: Any, passes: Any = 2) -> dict[st
     validation_baseline_key = ("validation", json.dumps(base_settings, sort_keys=True, separators=(",", ":")))
     validation_tuned_key = ("validation", json.dumps(best_settings, sort_keys=True, separators=(",", ":")))
     safe_concept = {key: value for key, value in concept.items() if not key.startswith("_")}
-    judgment_snapshot = [{key: row[key] for key in ("concept_id", "query_id", "document_index", "document_id", "rating", "pinned", "reason", "query_fingerprint") if key in row} for row in judgments]
+    judgment_snapshot = [{key: row[key] for key in ("concept_id", "query_id", "document_index", "document_id", "rating", "pinned", "reason", "query_fingerprint", "stale") if key in row} for row in all_judgments]
     output_snapshot: dict[str, Any] = {"train": {"baseline": output_cache.get(train_baseline_key, {}), "tuned": output_cache.get(train_tuned_key, {})}}
     if validation_metrics is not None:
         output_snapshot["validation"] = {"baseline": output_cache.get(validation_baseline_key, {}), "tuned": output_cache.get(validation_tuned_key, {})}
-    index_identity, identity_warning = _index_identity(connection, concept["corpus"]["index"])
-    run_body = {"settings": best_settings, "filters": concept["filters"], "effective_filters": concept["filters"], "baseline": baseline, "tuned": best_metrics, "train": train_metrics, "validation": validation_metrics, "judged_count": len(judged), "explicit_unjudged_count": explicit_unjudged_count, "unjudged_retrieved_count": unjudged_retrieved_count, "pinned_count": pinned_count, "input_snapshot": {"concept": safe_concept, "judgments": judgment_snapshot}, "output_snapshot": output_snapshot, "reproducibility": {"index": concept["corpus"]["index"], "index_identity": index_identity, "mapping_fingerprint": _json_hash(_validate_search_fields(connection, concept)["fields"]), "query_fingerprint": _json_hash(concept["queries"]), "concept_fingerprint": concept_fingerprint, "filters_fingerprint": _json_hash(concept["filters"]), "judgment_fingerprint": _json_hash(judgments), "settings_fingerprint": _json_hash(base_settings), "algorithm": "bounded-coordinate-search-v1"}}
+    for entry in candidate_trace:
+        settings_key = json.dumps(entry["settings"], sort_keys=True, separators=(",", ":"))
+        entry["fingerprints"] = {
+            "settings": _json_hash(entry["settings"]),
+            "train_metrics": _json_hash(entry["train_metrics"]) if entry["train_metrics"] is not None else None,
+            "validation_metrics": _json_hash(entry["validation_metrics"]) if entry["validation_metrics"] is not None else None,
+            "train_output": _json_hash(output_cache.get(("train", settings_key), {})),
+            "validation_output": _json_hash(output_cache.get(("validation", settings_key), {})),
+        }
+    baseline_rankings = rankings_cache.get(validation_baseline_key, {})
+    selected_rankings = rankings_cache.get(validation_tuned_key, {}) if validation_metrics is not None else baseline_rankings
+    diagnostic_failure = baseline_validation_error or next((row.get("error") for row in candidate_trace if row.get("evaluation_status") == "failed"), None)
+    if stop_reason == "time_budget" and not diagnostic_failure:
+        diagnostic_failure = "Validation work stopped at the configured time budget; remaining candidates were not evaluated."
+    validation_diagnostics = _validation_diagnostics(baseline_validation, validation_tuned, all_judgments, query_map,
+        baseline_rankings, selected_rankings, base_settings["size"], failure=diagnostic_failure)
+    try:
+        index_timeout = remaining_timeout()
+    except _TuneTimeBudgetExpired:
+        index_timeout = None
+    if index_timeout is not None:
+        index_identity, identity_warning = _index_identity(connection, concept["corpus"]["index"], timeout=index_timeout)
+    else:
+        index_identity = {"requested_index": concept["corpus"]["index"], "uuids": [], "available": False}
+        identity_warning = "Elasticsearch index UUID lookup was skipped because no time remained after candidate evaluation."
+    elapsed_ms = max(0, int((clock() - started) * 1000))
+    tuning_budget = {"max_candidates": max_candidates, "time_budget_seconds": time_budget_seconds,
+                     "candidates_evaluated": sum(row.get("train_metrics") is not None for row in candidate_trace),
+                     "elapsed_ms": elapsed_ms, "stop_reason": stop_reason}
+    run_body = {"settings": best_settings, "filters": concept["filters"], "effective_filters": concept["filters"], "baseline": baseline, "tuned": best_metrics, "train": train_metrics, "validation": validation_metrics, "candidate_trace": candidate_trace, "selection": selection, "validation_diagnostics": validation_diagnostics, "tuning_budget": tuning_budget, "judged_count": len(judged), "explicit_unjudged_count": explicit_unjudged_count, "unjudged_retrieved_count": unjudged_retrieved_count, "pinned_count": pinned_count, "input_snapshot": {"concept": safe_concept, "judgments": judgment_snapshot}, "output_snapshot": output_snapshot, "reproducibility": {"index": concept["corpus"]["index"], "index_identity": index_identity, "mapping_fingerprint": _json_hash(schema["fields"]), "query_fingerprint": _json_hash(concept["queries"]), "concept_fingerprint": concept_fingerprint, "filters_fingerprint": _json_hash(concept["filters"]), "judgment_fingerprint": _json_hash(all_judgments), "settings_fingerprint": _json_hash(base_settings), "candidate_trace_fingerprint": _json_hash(candidate_trace), "output_snapshot_fingerprint": _json_hash(output_snapshot), "algorithm": TUNE_ALGORITHM_VERSION}}
     run_id = _store_run(concept["id"], "tune", run_body)
     warnings = []
     if validation_metrics is None:
@@ -1797,7 +2036,7 @@ def _plain_tune_summary(result: dict[str, Any]) -> dict[str, Any]:
         val_regressions = [str(row.get("query_id")) for row in val_after.get("queries", []) if row.get("ndcg_at_k", 0) < next((old.get("ndcg_at_k", 0) for old in val_before.get("queries", []) if old.get("query_id") == row.get("query_id")), 0)]
         if val_regressions:
             details.append("검증 자료에서 nDCG가 낮아진 질의: " + ", ".join(val_regressions[:20]) + (" …" if len(val_regressions) > 20 else "."))
-        caveats.append("검증 점수는 설정 선택에 사용되지 않았으며 이 validation query set에 한정됩니다.")
+        caveats.append("검증 점수는 제한된 후보 중 설정을 선택하는 데만 사용했으며, 이 validation query set에 한정됩니다.")
     else:
         caveats.append("검증 judgment가 없어 일반화 성능을 확인하지 않았습니다.")
     scope = f"학습 query {after.get('query_count', 0)}개, graded judgment {after.get('judged_count', 0)}개, 결과 내 미평가 문서 {result.get('unjudged_retrieved_count', 0)}개."
@@ -1829,7 +2068,7 @@ def list_runs(concept_id: str = "", limit: Any = 50) -> dict[str, Any]:
                 return [trim_output(item) for item in value[:keep]]
             return value
         output_snapshot = trim_output(body.get("output_snapshot"))
-        runs.append({"run_id": row["id"], "concept_id": row["concept_id"], "created_at": row["created_at"], "kind": row["kind"], "query": body.get("query"), "settings": body.get("settings"), "effective_filters": body.get("effective_filters", body.get("filters", [])), "metrics": body.get("tuned", body.get("candidate")), "snapshot": {key: body[key] for key in ("query_id", "baseline_ids", "candidate_ids", "train", "validation", "judged_count", "explicit_unjudged_count", "unjudged_retrieved_count", "pinned_count") if key in body}, "input_snapshot": input_snapshot, "output_snapshot": output_snapshot, "output_snapshot_truncated": budget[0] == 0, "reproducibility": body.get("reproducibility", {})})
+        runs.append({"run_id": row["id"], "concept_id": row["concept_id"], "created_at": row["created_at"], "kind": row["kind"], "query": body.get("query"), "settings": body.get("settings"), "effective_filters": body.get("effective_filters", body.get("filters", [])), "metrics": body.get("tuned", body.get("candidate")), "snapshot": {key: body[key] for key in ("query_id", "baseline_ids", "candidate_ids", "train", "validation", "judged_count", "explicit_unjudged_count", "unjudged_retrieved_count", "pinned_count", "candidate_trace", "selection", "validation_diagnostics", "tuning_budget") if key in body}, "input_snapshot": input_snapshot, "output_snapshot": output_snapshot, "output_snapshot_truncated": budget[0] == 0, "reproducibility": body.get("reproducibility", {})})
     return {"runs": runs}
 
 
@@ -1905,6 +2144,7 @@ def export_run(concept_id: str, run_id: str) -> dict[str, Any]:
         "query", "query_id", "effective_filters", "settings", "filters", "baseline",
         "candidate", "tuned", "train", "validation", "judged_count",
         "explicit_unjudged_count", "unjudged_retrieved_count", "pinned_count",
+        "candidate_trace", "selection", "validation_diagnostics", "tuning_budget",
         "input_snapshot", "output_snapshot", "baseline_ids", "candidate_ids",
         "reproducibility",
     }

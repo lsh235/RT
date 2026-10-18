@@ -109,6 +109,7 @@ const state = {
   evaluationVersion: null,
   evaluationDatasetDraft: null,
   evaluationRuns: [],
+  lastConceptTune: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -243,6 +244,27 @@ const R08_COPY = {
 };
 
 function r08Copy(key) { return R08_COPY[state.locale]?.[key] || R08_COPY.ko[key] || key; }
+const R09_COPY = {
+  ko: {
+    maxCandidates: "최대 후보 수", timeBudget: "시간 한도 (초)", budgetHelp: "기준선을 포함해 최대 후보 30개 · 최대 600초", runTune: "설정 비교",
+    resultTitle: "설정 비교 결과", resultBoundary: "학습 판단으로 후보 설정을 평가하고 검증 판단으로 후보 중 하나를 선택했습니다. 시험용 자료는 사용하지 않았습니다.",
+    invalidBudget: "후보 수는 1–30, 시간 한도는 1–600초의 정수여야 합니다.", busy: "제한된 후보 탐색 중…", done: "설정 비교가 끝났습니다.", budgetTitle: "탐색 한도와 종료 상태", effectiveCandidates: "적용 후보 한도", effectiveSeconds: "적용 시간 한도", evaluated: "평가한 설정", elapsed: "경과 시간", stopReason: "종료 이유", stop_completed: "후보 탐색 완료", stop_candidate_budget: "후보 한도 도달 · 결과가 일부 탐색일 수 있음", stop_time_budget: "시간 한도 도달 · 결과가 일부 탐색일 수 있음",
+    traceStatus_pending: "대기 중", traceStatus_evaluated: "평가 완료", traceStatus_validation_unavailable: "검증 자료 없음", traceStatus_validation_no_positive_judgments: "검증 양성 판단 없음", traceStatus_not_evaluated_time_budget: "시간 한도로 미평가", traceStatus_failed: "평가 실패", traceStatus_unknown: "알 수 없는 상태",
+    traceTitle: "순서가 고정된 후보 기록", candidate: "후보", settings: "설정", train: "학습 지표", validation: "검증 지표", evaluationStatus: "평가 상태", selected: "선택됨", notSelected: "선택되지 않음", selectionTitle: "검증 선택 결과", selectedReason: "후보를 검증 기준으로 선택했습니다.", retainedWorse: "개선 후보가 없어 기준선을 유지했습니다.", retainedTie: "동률이므로 기준선을 유지했습니다.", validationUnavailable: "사용 가능한 검증 양성 판단이 없어 기준선을 유지했습니다.", validationFailed: "검증이 실패하거나 불완전해 기준선을 유지했습니다.", unknownSelection: "기준선을 유지했습니다. 응답에 선택 사유가 없습니다.", diagnosticTitle: "검증 질의별 진단", diagnosticStatus: "진단 상태", metricDeltas: "지표 변화량", newlyMissed: "새로 누락된 known-relevant judged targets", recovered: "회수된 known-relevant judged targets", baselineMissed: "기준선에서 누락", selectedMissed: "선택 설정에서 누락", retrievedUnjudged: "검색된 미평가 문서", stale: "오래된 판단", noTargets: "없음", qrelsLimit: "저장된 판단 대상만 진단합니다. 누락이 없다는 사실은 모든 관련 대상을 찾았다는 뜻이 아닙니다.", incomplete: "판단 자료가 불완전해 진단 범위에 제한이 있습니다.", apply: "이 설정을 워크벤치에 명시적으로 적용", applied: "튜닝 설정을 워크벤치에 적용했습니다. 저장은 별도 동작입니다.", metricNdcg: "nDCG@K", metricCoverage: "평가 문서 포함률@K", metricRecall: "판단된 관련 문서 회수율@K", noDiagnostics: "검증 질의별 진단이 없습니다.", status_failed: "진단 실패", status_incomplete: "불완전", status_ok: "완료", status_unknown: "상태 미상"
+  },
+  en: {
+    maxCandidates: "Maximum candidates", timeBudget: "Time budget (seconds)", budgetHelp: "Up to 30 candidates including baseline · up to 600 seconds", runTune: "Compare settings",
+    resultTitle: "Settings comparison", resultBoundary: "Train judgments evaluate candidate settings; validation judgments select among them. Test data was not used.",
+    invalidBudget: "Candidate count must be an integer from 1–30; time budget must be an integer from 1–600 seconds.", busy: "Running bounded candidate search…", done: "Settings comparison completed.", budgetTitle: "Search limits and stop state", effectiveCandidates: "Effective candidate limit", effectiveSeconds: "Effective time limit", evaluated: "Configurations evaluated", elapsed: "Elapsed time", stopReason: "Stop reason", stop_completed: "Candidate search completed", stop_candidate_budget: "Candidate limit reached · results may be partial", stop_time_budget: "Time limit reached · results may be partial",
+    traceStatus_pending: "Pending", traceStatus_evaluated: "Evaluated", traceStatus_validation_unavailable: "Validation unavailable", traceStatus_validation_no_positive_judgments: "No positive validation judgments", traceStatus_not_evaluated_time_budget: "Not evaluated: time budget", traceStatus_failed: "Evaluation failed", traceStatus_unknown: "Unknown status",
+    traceTitle: "Ordered candidate trace", candidate: "Candidate", settings: "Settings", train: "Train metrics", validation: "Validation metrics", evaluationStatus: "Evaluation status", selected: "Selected", notSelected: "Not selected", selectionTitle: "Validation selection", selectedReason: "A candidate was selected using validation.", retainedWorse: "No candidate improved validation; baseline retained.", retainedTie: "Exact tie; baseline retained.", validationUnavailable: "No usable positive validation judgments; baseline retained.", validationFailed: "Validation failed or was incomplete; baseline retained.", unknownSelection: "Baseline retained. The response did not include a selection reason.", diagnosticTitle: "Per-query validation diagnostics", diagnosticStatus: "Diagnostic status", metricDeltas: "Metric changes", newlyMissed: "Newly missed known-relevant judged targets", recovered: "Recovered known-relevant judged targets", baselineMissed: "Missed by baseline", selectedMissed: "Missed by selected settings", retrievedUnjudged: "Retrieved unjudged documents", stale: "Stale judgments", noTargets: "None", qrelsLimit: "Only saved judged targets are diagnosed. No reported misses does not prove that all relevant targets were found.", incomplete: "Judgments are incomplete, so diagnostic coverage is limited.", apply: "Explicitly apply these settings to the workbench", applied: "Tuning settings applied to the workbench. Saving is a separate action.", metricNdcg: "nDCG@K", metricCoverage: "Judged coverage@K", metricRecall: "Judged relevant recall@K", noDiagnostics: "No per-query validation diagnostics were returned.", status_failed: "Diagnostic failed", status_incomplete: "Incomplete", status_ok: "Complete", status_unknown: "Status unavailable"
+  }
+};
+function r09Copy(key) { return R09_COPY[state.locale]?.[key] || R09_COPY.ko[key] || key; }
+function applyR09Locale() {
+  $$('[data-r09-i18n]').forEach((node) => { node.textContent = r09Copy(node.dataset.r09I18n); });
+  if (state.lastConceptTune) renderConceptTuneResult(state.lastConceptTune.result, state.lastConceptTune.concept, state.lastConceptTune.connectionGeneration);
+}
 function applyR08Locale() {
   $$("[data-r08-i18n]").forEach((node) => { node.textContent = r08Copy(node.dataset.r08I18n); });
   $("#evaluation-unjudged-policy")?.querySelector('option[value="judged_only"]') && ($("#evaluation-unjudged-policy").querySelector('option[value="judged_only"]').textContent = state.locale === "en" ? "judged_only · numeric judgments only" : "judged_only · 수치 판단 문서만 점수 계산");
@@ -263,6 +285,7 @@ function applyLocale(locale) {
   renderRerankerStatus();
   $$('[data-i18n]').forEach(node => { const value = copy(node.dataset.i18n); if (value) node.textContent = value; });
   applyR08Locale();
+  applyR09Locale();
   $("#es-url").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch endpoint URL" : "Elasticsearch endpoint 주소");
   $("#index-name").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch index name" : "Elasticsearch 인덱스 이름");
   const sharedProfileLabel = document.querySelector('label[for="embedding-profile-select"]');
@@ -4193,28 +4216,88 @@ async function runConceptTune() {
   const concept = collectConcept();
   if (!state.connected) return;
   if (!state.conceptId) return showToast("튜닝하기 전에 개념을 저장하세요.", true);
+  const maxCandidates = Number($("#concept-tune-max-candidates").value);
+  const timeBudgetSeconds = Number($("#concept-tune-time-budget").value);
+  if (!Number.isInteger(maxCandidates) || maxCandidates < 1 || maxCandidates > 30 || !Number.isInteger(timeBudgetSeconds) || timeBudgetSeconds < 1 || timeBudgetSeconds > 600) {
+    $("#concept-tune-max-candidates").setCustomValidity(maxCandidates < 1 || maxCandidates > 30 || !Number.isInteger(maxCandidates) ? r09Copy("invalidBudget") : "");
+    $("#concept-tune-time-budget").setCustomValidity(timeBudgetSeconds < 1 || timeBudgetSeconds > 600 || !Number.isInteger(timeBudgetSeconds) ? r09Copy("invalidBudget") : "");
+    $("#concept-tune-max-candidates").reportValidity();
+    $("#concept-tune-time-budget").reportValidity();
+    $("#concept-tune-status").textContent = r09Copy("invalidBudget");
+    return;
+  }
+  $("#concept-tune-max-candidates").setCustomValidity("");
+  $("#concept-tune-time-budget").setCustomValidity("");
   const requestConnectionGeneration = state.connectionGeneration;
   const button = $("#concept-tune"); button.disabled = true;
-  $("#concept-tune-results").innerHTML = '<div class="loading-inline"><i class="spinner"></i> 평가 자료로 설정을 비교하고 있습니다.</div>';
+  $("#concept-tune-status").textContent = r09Copy("busy");
+  $("#concept-tune-results").innerHTML = `<div class="loading-inline" role="status" aria-live="polite"><i class="spinner"></i> ${escapeHtml(r09Copy("busy"))}</div>`;
   try {
-    const result = await api("/api/concepts/tune", { connection: getConnection(), concept, passes: Number($("#concept-tune-passes").value) });
+    const result = await api("/api/concepts/tune", { connection: getConnection(), concept, max_candidates: maxCandidates, time_budget_seconds: timeBudgetSeconds });
     state.tunedSettings = result.settings || null;
-    const warningHtml = localizedConceptWarnings(result).map((item) => `<p class="notice notice-muted">${escapeHtml(item)}</p>`).join("");
-    const validationHtml = result.validation
-      ? `<div><span>검증용 · 조정 전</span><p>${metricSummary(result.validation.baseline)}</p></div><div><span>검증용 · 조정 후</span><p>${metricSummary(result.validation.tuned)}</p></div>`
-      : `<div class="validation-empty"><span>검증용 평가</span><p>검증용 평가 자료가 없어 일반화 여부를 확인하지 못했습니다. 현재 결과는 학습용 자료 기준입니다.</p></div>`;
-    const queryDetails = [renderPerQueryMetrics("학습용 · 조정 전", result.baseline), renderPerQueryMetrics("학습용 · 조정 후", result.tuned), renderPerQueryMetrics("검증용 · 조정 전", result.validation?.baseline), renderPerQueryMetrics("검증용 · 조정 후", result.validation?.tuned)].join("");
-    const plain = result.plain_summary || {};
-    const humanSummary = `<section class="plain-outcome"><h4>${escapeHtml(plain.headline || "평가한 문서를 기준으로 설정을 비교했습니다.")}</h4>${(plain.details || []).map((detail) => `<p>${escapeHtml(detail)}</p>`).join("")}${(plain.caveats || []).map((caveat) => `<p class="outcome-caveat">${escapeHtml(caveat)}</p>`).join("")}</section>`;
-    const numericDetails = `<details class="numeric-outcomes"><summary>상세 수치와 질의별 비교 보기</summary><div class="tune-metric-grid"><div><span>학습용 · 조정 전</span><p>${metricSummary(result.baseline)}</p></div><div><span>학습용 · 조정 후</span><p>${metricSummary(result.tuned)}</p></div>${validationHtml}</div><p class="helper-text">평가 ${Number(result.judged_count || 0)}건 · 명시적 미평가 ${Number(result.explicit_unjudged_count || 0)}건 · 결과 내 미평가 ${Number(result.unjudged_retrieved_count || 0)}건 · 따로 고정 ${Number(result.pinned_count || 0)}건</p>${queryDetails}</details>`;
-    const missedTargets = renderTuneMisses(result, concept, requestConnectionGeneration);
-    $("#concept-tune-results").innerHTML = `<div class="concept-tune-result card"><div class="concept-section-heading"><div><h3>설정 비교 결과</h3><p>조정은 학습용 평가 자료만 사용했습니다. 다른 질의 평가는 별도로 확인합니다.</p></div><button type="button" class="button button-primary button-small apply-tuned-settings">워크벤치에 이 설정 적용</button></div>${humanSummary}${numericDetails}${missedTargets}<details><summary>적용 설정</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.settings || {}, null, 2))}</pre></details>${warningHtml}</div>`;
+    state.lastConceptTune = { result, concept, connectionGeneration: requestConnectionGeneration };
+    renderConceptTuneResult(result, concept, requestConnectionGeneration);
+    $("#concept-tune-status").textContent = r09Copy("done");
     await loadConceptRuns();
   } catch (error) {
     const detail = /positive|relevant|grade|label|judg/i.test(error.message) ? "설정 비교를 시작하려면 학습용 질의 결과에서 적어도 한 문서를 ‘조금 관련’ 이상으로 평가해 주세요. 0점은 무관, ‘미평가’는 아직 판단하지 않은 상태입니다." : error.message;
+    $("#concept-tune-status").textContent = detail;
     $("#concept-tune-results").innerHTML = `<div class="notice notice-error">${escapeHtml(detail)}</div>`;
   }
   finally { button.disabled = !state.connected; }
+}
+
+function r09MetricValue(metrics, key) {
+  const value = metrics?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? formatNumber(value) : "—";
+}
+
+function renderCandidateTrace(result) {
+  const rows = Array.isArray(result.candidate_trace) ? result.candidate_trace : [];
+  const selectedId = result.selection?.selected_candidate_id || "baseline";
+  if (!rows.length) return `<p class="helper-text">${escapeHtml(r09Copy("noDiagnostics"))}</p>`;
+  return `<section class="r09-candidate-trace"><h4>${escapeHtml(r09Copy("traceTitle"))}</h4><div class="eval-table-wrap"><table class="eval-table"><thead><tr><th>${escapeHtml(r09Copy("candidate"))}</th><th>${escapeHtml(r09Copy("settings"))}</th><th>${escapeHtml(r09Copy("train"))}</th><th>${escapeHtml(r09Copy("validation"))}</th><th>${escapeHtml(r09Copy("evaluationStatus"))}</th></tr></thead><tbody>${rows.map((row) => {
+    const train = row.train_metrics || {};
+    const validation = row.validation_metrics || {};
+    const selected = row.candidate_id === selectedId;
+    const statusKey = `traceStatus_${row.evaluation_status || "unknown"}`;
+    const localizedStatus = R09_COPY[state.locale]?.[statusKey] || r09Copy("traceStatus_unknown");
+    return `<tr class="${selected ? "r09-selected-row" : ""}"><td><code>${escapeHtml(row.candidate_id || "—")}</code>${selected ? `<span class="r09-selected-tag">${escapeHtml(r09Copy("selected"))}</span>` : ""}</td><td><pre class="r09-settings">${escapeHtml(JSON.stringify(row.settings || {}, null, 2))}</pre></td><td>${escapeHtml(r09Copy("metricNdcg"))}: ${r09MetricValue(train, "ndcg_at_k")}<br>${escapeHtml(r09Copy("metricCoverage"))}: ${r09MetricValue(train, "judged_coverage_at_k")}</td><td>${escapeHtml(r09Copy("metricNdcg"))}: ${r09MetricValue(validation, "ndcg_at_k")}<br>${escapeHtml(r09Copy("metricCoverage"))}: ${r09MetricValue(validation, "judged_coverage_at_k")}</td><td>${escapeHtml(localizedStatus)}</td></tr>`;
+  }).join("")}</tbody></table></div></section>`;
+}
+
+function r09MissList(items) {
+  if (!Array.isArray(items) || !items.length) return escapeHtml(r09Copy("noTargets"));
+  return `<ul class="r09-doc-list">${items.map((item) => `<li><code>${escapeHtml(item.document_index || "")}/${escapeHtml(item.document_id || "")}</code>${item.rating != null ? ` · ${escapeHtml(item.rating)}` : ""}</li>`).join("")}</ul>`;
+}
+
+function renderValidationDiagnostics(result) {
+  const rows = Array.isArray(result.validation_diagnostics) ? result.validation_diagnostics : [];
+  const qrelsIncomplete = result.validation_qrels_complete === false || result.validation?.qrels_complete === false || rows.some((row) => row.status === "incomplete" || row.incomplete_categories?.length);
+  if (!rows.length) return `<section class="r09-diagnostics"><h4>${escapeHtml(r09Copy("diagnosticTitle"))}</h4>${qrelsIncomplete ? `<p class="notice notice-muted">${escapeHtml(r09Copy("incomplete"))}</p>` : ""}<p class="notice notice-muted">${escapeHtml(r09Copy("noDiagnostics"))}</p><p class="r09-limit">${escapeHtml(r09Copy("qrelsLimit"))}</p></section>`;
+  return `<section class="r09-diagnostics"><h4>${escapeHtml(r09Copy("diagnosticTitle"))}</h4>${qrelsIncomplete ? `<p class="notice notice-muted">${escapeHtml(r09Copy("incomplete"))}</p>` : ""}<p class="r09-limit">${escapeHtml(r09Copy("qrelsLimit"))}</p><div class="eval-table-wrap"><table class="eval-table"><thead><tr><th>${escapeHtml(r09Copy("candidate"))}</th><th>${escapeHtml(r09Copy("diagnosticStatus"))}</th><th>${escapeHtml(r09Copy("metricDeltas"))}</th><th>${escapeHtml(r09Copy("newlyMissed"))}</th><th>${escapeHtml(r09Copy("recovered"))}</th><th>${escapeHtml(r09Copy("baselineMissed"))}</th><th>${escapeHtml(r09Copy("selectedMissed"))}</th><th>${escapeHtml(r09Copy("retrievedUnjudged"))}</th><th>${escapeHtml(r09Copy("stale"))}</th><th>${escapeHtml(r09Copy("failure"))}</th></tr></thead><tbody>${rows.map((row) => {
+    const deltas = row.metric_deltas || {};
+    const status = row.status === "failed" ? "status_failed" : row.status === "incomplete" ? "status_incomplete" : row.status === "ok" || row.status === "complete" ? "status_ok" : "status_unknown";
+    const categories = [...(row.incomplete_categories || []), ...(row.error_categories || []), ...(row.errors || []), row.failure_category, row.error_category].filter(Boolean);
+    return `<tr><td class="query-cell"><span class="query-id">${escapeHtml(row.query_id || "")}</span><br>${escapeHtml(row.query || "")}</td><td>${escapeHtml(r09Copy(status))}</td><td>${escapeHtml(r09Copy("metricNdcg"))}: ${r09MetricValue(deltas, "ndcg_at_k")}<br>${escapeHtml(r09Copy("metricCoverage"))}: ${r09MetricValue(deltas, "judged_coverage_at_k")}<br>${escapeHtml(r09Copy("metricRecall"))}: ${r09MetricValue(deltas, "recall_of_judged_relevant_at_k")}</td><td>${r09MissList(row.missed_relevant_added)}</td><td>${r09MissList(row.missed_relevant_fixed)}</td><td>${r09MissList(row.baseline_missed_known_relevant)}</td><td>${r09MissList(row.selected_missed_known_relevant)}</td><td>${Number(row.baseline_retrieved_unjudged_count || 0)} → ${Number(row.selected_retrieved_unjudged_count || 0)}</td><td>${Number(row.stale_judgment_count || 0)}</td><td>${categories.length ? categories.map(escapeHtml).join(", ") : "—"}</td></tr>`;
+  }).join("")}</tbody></table></div></section>`;
+}
+
+function renderConceptTuneResult(result, concept, connectionGeneration) {
+  const warningHtml = localizedConceptWarnings(result).map((item) => `<p class="notice notice-muted">${escapeHtml(item)}</p>`).join("");
+  const plain = result.plain_summary || {};
+  const humanSummary = `<section class="plain-outcome"><h4>${escapeHtml(plain.headline || "평가한 문서를 기준으로 설정을 비교했습니다.")}</h4>${(plain.details || []).map((detail) => `<p>${escapeHtml(detail)}</p>`).join("")}${(plain.caveats || []).map((caveat) => `<p class="outcome-caveat">${escapeHtml(caveat)}</p>`).join("")}</section>`;
+  const budget = result.tuning_budget || {};
+  const stopKey = `stop_${budget.stop_reason || ""}`;
+  const budgetHtml = `<section class="r09-budget" aria-label="${escapeHtml(r09Copy("budgetTitle"))}"><h4>${escapeHtml(r09Copy("budgetTitle"))}</h4><dl><div><dt>${escapeHtml(r09Copy("effectiveCandidates"))}</dt><dd>${escapeHtml(budget.max_candidates ?? "—")}</dd></div><div><dt>${escapeHtml(r09Copy("effectiveSeconds"))}</dt><dd>${escapeHtml(budget.time_budget_seconds ?? "—")}</dd></div><div><dt>${escapeHtml(r09Copy("evaluated"))}</dt><dd>${escapeHtml(budget.candidates_evaluated ?? "—")}</dd></div><div><dt>${escapeHtml(r09Copy("elapsed"))}</dt><dd>${budget.elapsed_ms == null ? "—" : `${escapeHtml(budget.elapsed_ms)} ms`}</dd></div><div><dt>${escapeHtml(r09Copy("stopReason"))}</dt><dd>${escapeHtml(R09_COPY[state.locale]?.[stopKey] || budget.stop_reason || "—")}</dd></div></dl></section>`;
+  const selection = result.selection || {};
+  const reasonKey = ({ candidate_selected: "selectedReason", no_candidate_improved: "retainedWorse", baseline_retained_tie: "retainedTie", validation_unavailable: "validationUnavailable", validation_failed: "validationFailed" })[selection.reason] || "unknownSelection";
+  const selectedSettings = result.settings || (result.candidate_trace || []).find((item) => item.candidate_id === (selection.selected_candidate_id || "baseline"))?.settings || null;
+  if (selectedSettings) state.tunedSettings = selectedSettings;
+  const applyButton = selectedSettings ? `<button type="button" class="button button-primary button-small apply-tuned-settings">${escapeHtml(r09Copy("apply"))}</button>` : "";
+  const diagnostics = renderValidationDiagnostics(result);
+  const missedTargets = renderTuneMisses(result, concept, connectionGeneration);
+  $("#concept-tune-results").innerHTML = `<div class="concept-tune-result card"><div class="concept-section-heading"><div><h3>${escapeHtml(r09Copy("resultTitle"))}</h3><p>${escapeHtml(r09Copy("resultBoundary"))}</p></div>${applyButton}</div>${budgetHtml}<section class="r09-selection"><h4>${escapeHtml(r09Copy("selectionTitle"))}: <code>${escapeHtml(selection.selected_candidate_id || "baseline")}</code></h4><p>${escapeHtml(r09Copy(reasonKey))}</p></section>${renderCandidateTrace(result)}${diagnostics}${humanSummary}${missedTargets}${selectedSettings ? `<details><summary>${escapeHtml(r09Copy("settings"))}</summary><pre class="explain-box">${escapeHtml(JSON.stringify(selectedSettings, null, 2))}</pre></details>` : ""}${warningHtml}</div>`;
 }
 
 async function loadConceptRuns() {

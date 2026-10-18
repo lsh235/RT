@@ -1,6 +1,6 @@
 # Local API and storage contract
 
-This document describes the loopback HTTP API and local SQLite boundaries through v1.13.0. The workbench is a local application; these routes are not an externally hosted service contract.
+This document describes the loopback HTTP API and local SQLite boundaries through v1.14.0. The workbench is a local application; these routes are not an externally hosted service contract.
 
 ## Transport and authentication
 
@@ -85,6 +85,12 @@ The default `judged_only` policy removes retrieved qrels that are absent or expl
 `unjudged_as_nonrelevant` is accepted only when the dataset explicitly asserts `qrels_complete: true`; each run/export records the policy and its consequences. Evaluation request fields include `dataset_id`, `version_id`, `split`, `mode`, `settings`, `cutoff`, and `configuration_frozen`. Test evaluation requires `configuration_frozen: true`, an available Elasticsearch index UUID, and a complete successful query batch. Only one successful test run may be saved per dataset version and corpus UUID identity; failed test batches reveal failure categories without exposing held-out metrics and do not consume that run. Per-query run comparisons require identical dataset fingerprint, split, index/corpus and mapping fingerprints, cutoff, and metric policy; candidate settings may differ so regressions and missed known-relevant documents can be shown.
 
 These routes provide evaluation workflow and auditable metrics; they do not establish the license, completeness, or representativeness of imported qrels, nor do synthetic fixtures establish retrieval quality. Do not use the existing 25-document Jira fixture as a general benchmark.
+
+### Bounded concept tuning (R09)
+
+`POST /api/concepts/tune` accepts an optional `max_candidates` integer (1–30, default 30, counting the baseline) and `time_budget_seconds` integer (1–600, default 600). Invalid bounds are rejected before an Elasticsearch request is constructed. The response records effective limits, evaluated candidate count, elapsed time, and a `completed`, `candidate_budget`, or `time_budget` stop reason. Candidate IDs are ordered as `baseline`, then `candidate-001` onward; each trace row contains settings, train metrics, validation metrics, and evaluation status. Train judgments evaluate the finite candidate grid; validation judgments alone choose a candidate. A candidate must improve macro judged-only nDCG@K, with judged coverage@K as the next tie-breaker. Exact ties, worse candidates, unavailable/failed validation, or an incomplete validation run retain the stored baseline. No `test` judgments are loaded by this route, and the selected settings are never written to the saved concept automatically.
+
+The response and immutable saved run include selection reason, candidate/settings/metric/output fingerprints, index UUID and mapping identity when available, exact input snapshots, and per-validation-query diagnostics. These identify only known-relevant judged targets. Absent qrels and explicit-null judgments remain unknown, and incomplete qrels do not support an exhaustive missed-relevant claim. The run is stored under the active account and the existing list/export routes preserve owner scoping.
 
 ## SQLite ownership and schema migrations
 

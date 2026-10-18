@@ -973,7 +973,19 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         return concepts.save_judgment(payload)
 
     def _concept_tune(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return concepts.tune(self._connection(payload), payload.get("concept"), payload.get("passes", 2))
+        # Reject caller-controlled work bounds before building any ES request
+        # context or allowing the concept module to inspect a mapping.
+        max_candidates = concepts._bounded_int(
+            payload.get("max_candidates", 30), 1, concepts.TUNE_MAX_CANDIDATES, "max_candidates",
+        )
+        time_budget_seconds = concepts._bounded_int(
+            payload.get("time_budget_seconds", 600), 1, concepts.TUNE_MAX_SECONDS, "time_budget_seconds",
+        )
+        return concepts.tune(
+            self._connection(payload), payload.get("concept"), payload.get("passes", 2),
+            max_candidates=max_candidates,
+            time_budget_seconds=time_budget_seconds,
+        )
 
     def _concept_tune_readiness(self, payload: dict[str, Any]) -> dict[str, Any]:
         return concepts.tune_readiness(payload.get("concept"))

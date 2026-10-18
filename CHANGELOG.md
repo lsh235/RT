@@ -2,6 +2,13 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.14.0] - 2026-10-19
+
+- Add deterministic concept-tuning candidates with a 30-candidate and 600-second ceiling, train-only candidate metrics, and validation-only selection that keeps the baseline on ties or incomplete validation.
+- Save immutable owner-scoped run snapshots with candidate traces, fingerprints, query-level known-relevant misses, and explicit incomplete-qrels limits.
+- Add Korean/English budget controls and diagnostics; applying a candidate remains a separate user action.
+- No representative sourced-corpus quality claim is made; the final sourced-quality gate remains open pending permission-cleared evidence.
+
 ## [1.13.0] - 2026-10-19
 
 - Add account-scoped, immutable evaluation dataset versions with CSV/JSONL query and qrel import/export, canonical fingerprints, and source/rights/judgment provenance.
