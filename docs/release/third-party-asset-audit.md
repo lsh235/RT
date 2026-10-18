@@ -1,0 +1,13 @@
+# Third-party asset and redistribution audit
+
+**Status: NOT COMPLETE.** This inventory records observed files and provenance hints. It is not a legal conclusion or permission to redistribute an asset. Public release remains blocked or NO-GO until each included item has a documented license/permission basis or is excluded from distributed artifacts.
+
+| Asset | Observed evidence | Current decision |
+|---|---|---|
+| `es_rag_tuner/data/grpc_jira_issues_es_bulk.ndjson` | Bundled 97,164-byte NDJSON corpus. Rows contain gRPC GitHub issue summaries, descriptions/comments, reporter/assignee/participant handles, dates, labels, and `source_url` links such as `https://github.com/grpc/grpc/issues/25713`. The neighboring mapping JSON names `https://github.com/grpc/grpc/issues` as `source_repository`. | **UNRESOLVED.** Repository/issue visibility alone is not recorded as a redistribution grant. Identify the original collection/author, exact issue-content terms and any exclusions before redistributing. |
+| `es_rag_tuner/data/es_jira_index_mapping_and_tuning.json` | Bundled mapping/analyzer/settings and benchmark metadata; it points at the NDJSON file and states `total_documents: 20`, while current documentation reports 25 loaded rows. | **UNRESOLVED.** Confirm authorship and reconcile provenance/count before assigning a license or describing it as a complete benchmark. |
+| Python dependencies | Runtime and optional dependencies are declared in `pyproject.toml`; R01 adds development dependency declarations. | **PENDING R11.** Generate an exact-version dependency inventory for supported build artifacts and review notices/obligations from authoritative package metadata. |
+| Browser dependencies | The browser test manifest/lockfile is being added in R01. | **PENDING R11.** Audit the locked dependency tree and preserve applicable notices. |
+| Locally downloaded embedding/tokenizer assets | FastEmbed and tokenizer/model assets can be downloaded into local cache by optional features; no model weights are intentionally checked into the package. | **PENDING R11.** Verify exact artifacts/revisions and their terms for supported workflows; do not treat model availability as a redistribution grant. |
+
+The user selected Apache-2.0 for the project's original code. That choice does not resolve any row above. Do not claim the bundled corpus, dependencies, or model assets are covered by the project's code license without evidence. If a required right cannot be established, keep the corresponding release gate NOT RUN and avoid including the material in a release artifact where technically possible.

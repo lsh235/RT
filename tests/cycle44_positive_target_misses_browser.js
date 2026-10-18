@@ -9,6 +9,14 @@ const os = require("node:os");
 const path = require("node:path");
 const net = require("node:net");
 
+function workbenchPython(root) {
+  if (process.env.PYTHON) return process.env.PYTHON;
+  const venvPython = process.platform === "win32"
+    ? path.join(root, ".venv", "Scripts", "python.exe")
+    : path.join(root, ".venv", "bin", "python");
+  return fs.existsSync(venvPython) ? venvPython : (process.platform === "win32" ? "python" : "python3");
+}
+
 function allocatePort() {
   return new Promise((resolve, reject) => {
     const socket = net.createServer();
@@ -23,6 +31,7 @@ function allocatePort() {
 async function waitForServer(url, child) {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
+    if (child.spawnError) throw new Error(`could not start Python interpreter ${child.spawnError.message}`);
     if (child.exitCode !== null) throw new Error(`workbench exited with ${child.exitCode}`);
     try { if ((await fetch(url)).ok) return; } catch { /* wait for local listener */ }
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -32,14 +41,16 @@ async function waitForServer(url, child) {
 
 async function main() {
   const root = path.resolve(__dirname, "..");
+  const python = workbenchPython(root);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cycle44-positive-misses-"));
   const port = await allocatePort();
   const base = `http://127.0.0.1:${port}`;
-  const child = spawn(process.env.PYTHON || "python3", ["-m", "es_rag_tuner", "--host", "127.0.0.1", "--port", String(port)], {
+  const child = spawn(python, ["-m", "es_rag_tuner", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
     env: { ...process.env, ES_RAG_CONCEPT_DB: path.join(tempDir, "browser.sqlite3"), ES_RAG_ACCEPTANCE_ES_URL: "http://127.0.0.1:1" },
     stdio: "ignore",
   });
+  child.on("error", error => { child.spawnError = error; });
   let browser;
   try {
     await waitForServer(`${base}/api/health`, child);
@@ -371,8 +382,13 @@ async function main() {
     }));
   } finally {
     if (browser) await browser.close();
-    if (child.exitCode === null) child.kill("SIGTERM");
-    if (child.exitCode === null) await new Promise(resolve => child.once("exit", resolve));
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGTERM");
+      await new Promise(resolve => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve();
+        else child.once("exit", resolve);
+      });
+    }
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 }

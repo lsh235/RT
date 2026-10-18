@@ -1,0 +1,79 @@
+{
+  "plan": "docs/roadmap/oss-readiness-plan.md",
+  "plan_id": "oss-readiness-v1-16",
+  "recorded_at": "2026-10-18",
+  "baseline": {
+    "stable_tag": "v1.5.0",
+    "stable_tag_object": "f8e9fc51dce4663d74b2c4c16ec80fa8a0704dd1",
+    "stable_commit": "82f73359ae67141fe4e6201a91edac2633d9c239",
+    "starting_head": "868b875cf69c12d52c119b2e1ae3455b4918cd2e",
+    "starting_branch": "codex/cycle-44-positive-target-misses",
+    "origin_main_at_start": "868b875cf69c12d52c119b2e1ae3455b4918cd2e",
+    "work_branch": "codex/oss-readiness-v1-16",
+    "baseline_tag": "baseline-oss-readiness-v1-16",
+    "initial_tracked_worktree": "clean",
+    "preserved_preexisting_untracked": [
+      "docs/agent-sdk-upstream-review-2026-10-18.md",
+      "docs/novice-retrieval-improvements-2026-10-18.md",
+      "tests/cycle37_positive_target_misses_browser.js"
+    ],
+    "work_branch_existed_at_start": false,
+    "remote_work_branch_existed_at_start": false,
+    "codebase_memory": {
+      "graph_tools_available": false,
+      "freshness": "NOT RUN",
+      "coverage": "NOT RUN",
+      "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
+    }
+  },
+  "current_version": "1.6.0",
+  "current_stage": "R01",
+  "overall_status": "ready_to_commit",
+  "requested_agent_model": "gpt-6-luna",
+  "observable_runtime_model": "UNVERIFIED",
+  "round_policy": {
+    "initial_implementation_rounds_per_version": 1,
+    "maximum_cumulative_fix_retest_rounds_per_version": 3,
+    "maximum_total_rounds": 48,
+    "started_rounds": 4
+  },
+  "license": {
+    "project_code": "Apache-2.0",
+    "selected_by_user": true,
+    "third_party_sample_data_redistribution": "UNRESOLVED"
+  },
+  "versions": [
+    {"stage":"R01","version":"1.6.0","status":"ready_to_commit","owner_roles":["A","F","E"],"required_gates":"docs/acceptance/v1.6.0.md","fix_rounds_used":3,"evidence":["docs/acceptance/v1.6.0.md","docs/acceptance/v1.6.0-independent-qa.md"],"commit":null,"blockers":[]},
+    {"stage":"R02","version":"1.7.0","status":"pending","owner_roles":["A","E","F"],"required_gates":"docs/acceptance/v1.7.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R03","version":"1.8.0","status":"pending","owner_roles":["E","A","F"],"required_gates":"docs/acceptance/v1.8.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R04","version":"1.9.0","status":"pending","owner_roles":["C","A","E","F"],"required_gates":"docs/acceptance/v1.9.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R05","version":"1.10.0","status":"pending","owner_roles":["C","B","F"],"required_gates":"docs/acceptance/v1.10.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R06","version":"1.11.0","status":"pending","owner_roles":["B","A","F"],"required_gates":"docs/acceptance/v1.11.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R07","version":"1.12.0","status":"pending","owner_roles":["B","E","F"],"required_gates":"docs/acceptance/v1.12.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R08","version":"1.13.0","status":"pending","owner_roles":["D","E","F"],"required_gates":"docs/acceptance/v1.13.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R09","version":"1.14.0","status":"pending","owner_roles":["D","B","E","F"],"required_gates":"docs/acceptance/v1.14.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R10","version":"1.15.0","status":"pending","owner_roles":["A","D","E","F"],"required_gates":"docs/acceptance/v1.15.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R11","version":"1.16.0-rc.1","status":"pending","owner_roles":["F","A","B","C","D","E"],"required_gates":"docs/acceptance/v1.16.0-rc.1.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]},
+    {"stage":"R12","version":"1.16.0","status":"pending","owner_roles":["F","coordinator"],"required_gates":"docs/acceptance/v1.16.0.md","fix_rounds_used":0,"evidence":[],"commit":null,"blockers":[]}
+  ],
+  "current_gates": [
+    {"id":"offline-tests","required":true,"status":"PASS (185 passed; 1 expected skip)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"live-elasticsearch-auth-origin-csrf","required":true,"status":"PASS (19/19 on task-owned ES 9.5.5)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"browser-tests","required":true,"status":"PASS (18/18 synthetic Cycle 44 cases)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"provider-opt-in-and-default-ci-independence","required":true,"status":"PASS (bounded; no live-provider suite)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"clean-wheel-install-and-runtime-smoke","required":true,"status":"PASS","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"offline-and-disposable-es-ci","required":true,"status":"PASS (workflow configuration; hosted run NOT RUN)","evidence":".github/workflows/ci.yml; docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"read-only-elasticsearch-doctor","required":true,"status":"PASS (GET root only; live index list unchanged)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"fresh-environment-install-docs","required":true,"status":"PASS","evidence":"CONTRIBUTING.md; docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"version-metadata","required":true,"status":"PASS (package, UI, and health 1.6.0)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"},
+    {"id":"user-worktree-preservation","required":true,"status":"PASS (paths remain untracked; initial hashes unavailable)","evidence":"docs/acceptance/v1.6.0-independent-qa.md"}
+  ],
+  "completed_commit": null,
+  "remaining_blockers": [
+    "Bundled third-party sample data redistribution rights remain unresolved before public release.",
+    "GitHub-hosted CI has not run; verify after the final authorized branch push.",
+    "Initial hashes for three pre-existing untracked user files were not captured, so byte-for-byte baseline comparison is unavailable.",
+    "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there."
+  ],
+  "push": {"attempted":false,"remote_head":null,"local_remote_sha_match":null}
+}

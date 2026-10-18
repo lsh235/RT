@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "es-rag-tuning-workbench"
-version = "1.5.0"
+version = "1.6.0"
 description = "A local Elasticsearch lexical and vector retrieval tuning workbench"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Private workspace utility" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = ["argon2-cffi>=23.1,<26"]
 
 [project.optional-dependencies]
@@ -19,9 +20,10 @@ agents = [
     "openai-codex>=0.163,<0.164; python_version >= '3.10'",
     "github-copilot-sdk>=1.0.22,<2; python_version >= '3.11'",
 ]
+dev = ["build>=1.2,<2", "pytest>=8,<9"]
 
 [project.scripts]
-es-rag-workbench = "es_rag_tuner.server:main"
+es-rag-workbench = "es_rag_tuner.__main__:main"
 
 [tool.setuptools]
 packages = ["es_rag_tuner"]
