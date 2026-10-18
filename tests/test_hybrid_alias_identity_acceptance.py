@@ -19,7 +19,13 @@ class HybridAliasIdentityAcceptanceTests(unittest.TestCase):
         self.connection = Connection.from_payload({"url": "http://127.0.0.1:9200"})
         self.alias = "docs-alias"
         self.lexical_info = {"query": {"match": {"body": "needle"}}}
-        self.vector_info = {"field": "rag_embedding", "dimensions": 3}
+        self.vector_info = {
+            "field": "rag_embedding",
+            "profile_id": "e5-multilingual-large",
+            "model": "intfloat/multilingual-e5-large",
+            "recipe": {"profile_id": "e5-multilingual-large"},
+            "dimensions": 1024,
+        }
 
     @staticmethod
     def response(*hits: dict) -> dict:
@@ -30,8 +36,9 @@ class HybridAliasIdentityAcceptanceTests(unittest.TestCase):
             self.assertEqual(index, self.alias)
             return self.response(*lexical_hits), self.lexical_info
 
-        def vector(connection, index, query_text, size, filters, source_fields):
+        def vector(connection, index, query_text, size, filters, source_fields, profile_id=None):
             self.assertEqual(index, self.alias)
+            self.assertIsNone(profile_id)
             return self.response(*vector_hits), self.vector_info
 
         with (

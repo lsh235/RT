@@ -36,6 +36,7 @@ def guard_shared_index_access(index: str) -> None:
 _LOCAL_OWNER: ContextVar[str | None] = ContextVar("es_rag_es_owner", default=None)
 _PRIVATE_SYNC_ALLOWED: ContextVar[bool] = ContextVar("es_rag_private_sync_allowed", default=False)
 _PRIVATE_READ_ALLOWED: ContextVar[bool] = ContextVar("es_rag_private_read_allowed", default=False)
+_SCOPED_SCROLL_INDEX: ContextVar[str | None] = ContextVar("es_rag_scoped_scroll_index", default=None)
 
 
 def bind_local_owner(owner_id: str | None) -> Any:
@@ -64,6 +65,18 @@ def private_read_scope():
         _PRIVATE_READ_ALLOWED.reset(token)
 
 
+@contextmanager
+def index_scroll_scope(index: str):
+    """Authorize a root scroll request only for a previously checked index."""
+    index = validate_index(index)
+    _guard_private_path(index, "POST")
+    token = _SCOPED_SCROLL_INDEX.set(index)
+    try:
+        yield
+    finally:
+        _SCOPED_SCROLL_INDEX.reset(token)
+
+
 def private_alias(owner_id: str) -> str:
     return "esrag-private-" + re.sub(r"[^0-9a-f]", "", str(owner_id).lower())
 
@@ -90,7 +103,8 @@ def _guard_private_path(path: str, method: str = "GET") -> bool:
                 if owner_alias is None or not (candidate == owner_alias or re.fullmatch(re.escape(owner_alias) + r"-g[0-9]+", candidate)):
                     raise PrivateIndexAccessError("Private knowledge index access denied", 403)
                 private_target = True
-    if decoded_path.startswith("/") and segments and segments[0] in {"_search", "_count", "_mapping", "_msearch"}:
+    is_scoped_scroll = len(segments) == 2 and segments == ["_search", "scroll"] and _SCOPED_SCROLL_INDEX.get() is not None
+    if decoded_path.startswith("/") and segments and segments[0] in {"_search", "_count", "_mapping", "_msearch"} and not is_scoped_scroll:
         raise PrivateIndexAccessError("Index-scoped Elasticsearch requests are required", 403)
     if "," in decoded_path:
         raise PrivateIndexAccessError("Multi-index Elasticsearch requests are disabled for authenticated accounts", 403)

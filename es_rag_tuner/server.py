@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
+import importlib.util
 import json
 import mimetypes
 import re
@@ -324,7 +326,47 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         self._api_error(404, "경로를 찾을 수 없습니다.", "NOT_FOUND")
 
     def _do_get_protected(self, path: str) -> None:
-        if path == "/api/knowledge/es-status":
+        if path == "/api/embedding/profiles":
+            default_profile_id = embeddings.profile_spec()["profile_id"]
+            profiles = []
+            for profile in embeddings.list_profiles():
+                profile_id = profile["profile_id"]
+                runtime = embeddings.runtime_status(profile_id)
+                spec = embeddings.profile_spec(profile_id)
+                recipe = embeddings.profile_recipe(profile_id)
+                try:
+                    tokenizer_version = importlib.metadata.version("tokenizers")
+                except importlib.metadata.PackageNotFoundError:
+                    tokenizer_version = None
+                profiles.append({
+                    "profile_id": profile_id,
+                    "model_name": spec["model_name"],
+                    "source_repo": spec.get("source_repo"),
+                    "source_revision": runtime.get("source_revision", spec.get("source_revision")),
+                    "fastembed_version": spec.get("fastembed_version"),
+                    "dimensions": spec["dimensions"],
+                    "similarity": spec.get("similarity"),
+                    "query_prefix": spec.get("query_prefix", ""),
+                    "passage_prefix": spec.get("passage_prefix", ""),
+                    "max_tokens": spec.get("max_tokens", spec.get("context_tokens")),
+                    "normalized": spec.get("normalized"),
+                    "tokenizer_runtime_installed": importlib.util.find_spec("tokenizers") is not None,
+                    "tokenizer_runtime_version": tokenizer_version,
+                    "license": spec.get("license"),
+                    "recipe": recipe,
+                    "recipe_fingerprint": recipe["recipe_fingerprint"],
+                    "runtime_installed": runtime.get("runtime_installed", False),
+                    "model_cached": runtime.get("model_cached", False),
+                    "setup_state": runtime.get("setup_state", runtime.get("status", "unavailable")),
+                    "safe_message": runtime.get("safe_message") or {
+                        "cached": "로컬 모델이 준비되었습니다.",
+                        "model_not_cached": "모델이 캐시에 없습니다. 명시적으로 준비한 뒤 다시 시도하세요.",
+                        "dependency_missing": "FastEmbed 런타임이 없습니다. semantic extra를 설치하세요.",
+                        "loading_failure": "로컬 모델을 불러오지 못했습니다. 설치와 캐시 상태를 확인하세요.",
+                    }.get(runtime.get("status"), "프로필 상태를 확인할 수 없습니다."),
+                })
+            self._json(200, {"default_profile_id": default_profile_id, "profiles": profiles})
+        elif path == "/api/knowledge/es-status":
             try:
                 self._json(200, knowledge.es_status())
             except Exception:
@@ -434,6 +476,9 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
     def _connect(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
+        profile_id = payload.get("profile_id")
+        profile_spec = embeddings.profile_spec(profile_id)
+        profile_recipe = embeddings.profile_recipe(profile_id)
         root = request(connection, "GET", "")
         try:
             indices = list_indices(connection)
@@ -444,19 +489,37 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         index = self._index(payload)
         exists = index_exists(connection, index)
         count = count_documents(connection, index) if exists else 0
-        embedding_status = embeddings.runtime_status()
+        embedding_status = embeddings.runtime_status(profile_id)
         has_embedding_mapping = False
         vector_count = 0
         embedding_dimensions = None
+        mapping_compatible = None
+        mapping_error = None
         if exists:
             try:
-                mapping = vector_mapping(connection, index, require_dimensions=False)
+                raw_mapping = vector_mapping(connection, index, require_dimensions=False)
                 has_embedding_mapping = True
-                embedding_dimensions = mapping.get("dims")
+                embedding_dimensions = raw_mapping.get("dims")
                 vector_count = count_vectors(connection, index)
+                try:
+                    mapping = vector_mapping(
+                        connection,
+                        index,
+                        profile_id=profile_id,
+                        allow_untagged_empty_profile=vector_count == 0,
+                    )
+                    embedding_dimensions = mapping.get("dims")
+                    mapping_compatible = True
+                except ElasticsearchError as exc:
+                    if exc.status != 409:
+                        raise
+                    mapping_error = _safe_domain_message(exc)
+                    mapping_compatible = False
             except ElasticsearchError as exc:
                 if "dense_vector 형식의 rag_embedding" not in str(exc):
                     raise
+                else:
+                    mapping_compatible = False
         return {
             "cluster_name": root.get("cluster_name", ""),
             "version": root.get("version", {}).get("number", "unknown"),
@@ -470,7 +533,11 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             "sample_data_metadata_count": json.loads(evaluation.CONFIG_PATH.read_text(encoding="utf-8")).get("metadata", {}).get("total_documents"),
             "embedding": {
                 **embedding_status,
+                "profile_id": profile_spec["profile_id"],
+                "profile_recipe": profile_recipe,
                 "mapping_available": has_embedding_mapping,
+                "mapping_compatible": mapping_compatible if mapping_compatible is not None else has_embedding_mapping,
+                "mapping_error": mapping_error,
                 "mapping_dimensions": embedding_dimensions,
                 "vector_count": vector_count,
                 "document_count": count,
@@ -586,6 +653,8 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def _mapping(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
         index = self._index(payload)
+        profile_id = payload.get("profile_id")
+        profile_spec = embeddings.profile_spec(profile_id)
         response = request(connection, "GET", f"{quote(index, safe='')}/_mapping")
         if not isinstance(response, dict) or not response:
             raise ElasticsearchError("선택한 인덱스 또는 alias의 구체 인덱스 매핑을 확인할 수 없습니다.")
@@ -615,10 +684,12 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             "properties": properties,
             "fields": sorted(properties.keys()),
             "has_rag_embedding_mapping": vector_available,
+            "profile_id": profile_spec["profile_id"],
+            "profile_dimensions": profile_spec["dimensions"],
         }
 
     def _vectorize(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return vectorize_index(self._connection(payload), self._index(payload))
+        return vectorize_index(self._connection(payload), self._index(payload), payload.get("profile_id"))
 
     def _search(self, payload: dict[str, Any]) -> dict[str, Any]:
         connection = self._connection(payload)
@@ -651,6 +722,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 result = retrieve(
                     connection, index, query_text, size, boosts, filters,
                     mode=mode, rank_constant=rank_constant, source_fields=DISPLAY_FIELDS,
+                    profile_id=payload.get("profile_id"),
                 )
                 result["shared_search"] = {"state": "available"}
             except PrivateIndexAccessError:
@@ -673,9 +745,10 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 mode=mode,
                 rank_constant=rank_constant,
                 source_fields=DISPLAY_FIELDS,
+                profile_id=payload.get("profile_id"),
             )
         try:
-            private = knowledge.search_es_mode(connection, query_text, mode, size)
+            private = knowledge.search_es_mode(connection, query_text, mode, size, payload.get("profile_id"))
         except Exception:
             private = {"state": "unavailable", "mode": mode, "results": [], "message": "내 비공개 지식 검색을 준비할 수 없습니다. 공유 결과는 유지했으며 비공개 검색은 숨겼습니다. 내 지식 화면에서 모델, 매핑, 동기화 상태를 확인하세요."}
         result["private_knowledge"] = private
@@ -706,6 +779,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             mode="hybrid",
             rank_constant=rank_constant,
             source_fields=DISPLAY_FIELDS,
+            profile_id=payload.get("profile_id"),
         )
         code = codebase.search(query_text, issues.get("hits", []), size)
         return {
@@ -826,16 +900,19 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
     def _concept_vector_candidates(self, payload: dict[str, Any]) -> dict[str, Any]:
         return concepts.vector_candidates(
             self._connection(payload), str(payload.get("concept_id", "")), str(payload.get("query_id", "")),
+            payload.get("profile_id"),
         )
 
     def _concept_mode_comparison(self, payload: dict[str, Any]) -> dict[str, Any]:
         return concepts.mode_comparison(
             self._connection(payload), str(payload.get("concept_id", "")), str(payload.get("query_id", "")),
+            payload.get("profile_id"),
         )
 
     def _concept_mode_comparison_group(self, payload: dict[str, Any]) -> dict[str, Any]:
         return concepts.mode_comparison_group(
             self._connection(payload), str(payload.get("concept_id", "")), str(payload.get("query_id", "")),
+            payload.get("profile_id"),
         )
 
     def _concept_document(self, payload: dict[str, Any]) -> dict[str, Any]:

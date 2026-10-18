@@ -2,6 +2,14 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.11.0] - 2026-10-19
+
+- Add versioned local E5 and multilingual MiniLM embedding profiles with visible recipe details and cache readiness.
+- Bind shared and account-private vectors to model/tokenizer revisions, runtime, dimensions, similarity, prefixes, context limits, and private passage-slicing recipe; reject incompatible profile reuse before vector search.
+- Preserve the E5 default and legacy E5 vector behavior while recording profile metadata for newly vectorized indices and private generations.
+- Keep BM25 usable without loading or downloading embedding models; add explicit profile selection and download-consent states.
+- Validate local model execution for both profiles; retrieval-quality comparison remains outside this release's acceptance scope.
+
 ## [1.10.0] - 2026-10-19
 
 - Add account-private character, paragraph, and pinned-token chunk policies with source offsets, source revisions, policy fingerprints, and inspectable chunk counts.

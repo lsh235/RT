@@ -41,7 +41,7 @@ try:
     _FASTEMBED_VERSION = package_version("fastembed")
 except PackageNotFoundError:
     _FASTEMBED_VERSION = "not-installed"
-PRIVATE_VECTOR_RECIPE = {
+LEGACY_E5_VECTOR_RECIPE = {
     "model": embeddings.MODEL_NAME,
     "fastembed_version": _FASTEMBED_VERSION,
     "dimensions": embeddings.MODEL_DIMENSIONS,
@@ -53,9 +53,52 @@ PRIVATE_VECTOR_RECIPE = {
     "chunking": "tokenizer-offset contiguous non-overlap slices of original BM25 chunk; UTF-8-independent Python codepoint offsets",
     "chunking_version": "e5-token-slices-v1",
 }
+# Retain the historical public constant for E5 compatibility fixtures. New
+# generations use _private_profile_recipe() for full tokenizer provenance.
+PRIVATE_VECTOR_RECIPE = LEGACY_E5_VECTOR_RECIPE
 _WORD_RE = re.compile(r"[^\W]+", flags=re.UNICODE)
 _SYNC_LOCKS: dict[str, threading.Lock] = {}
 _SYNC_LOCKS_GUARD = threading.Lock()
+
+
+def _private_profile_recipe(profile_id: str) -> dict[str, Any]:
+    """Bind a private vector generation to its tokenizer and passage slicing recipe."""
+    recipe = embeddings.profile_recipe(profile_id)
+    try:
+        tokenizer_runtime = package_version("tokenizers")
+    except PackageNotFoundError:
+        tokenizer_runtime = None
+    if profile_id == embeddings.DEFAULT_PROFILE_ID:
+        tokenizer_repository = token_preview.REPOSITORY
+        tokenizer_revision = token_preview.REVISION
+        tokenizer_sha256 = token_preview.ASSETS["tokenizer.json"]
+        chunking_version = "e5-token-slices-v1"
+    else:
+        tokenizer_repository = recipe["source_repo"]
+        tokenizer_revision = recipe.get("source_revision")
+        tokenizer_sha256 = None
+        chunking_version = "profile-token-slices-v1"
+    recipe["tokenizer"] = {
+        "repository": tokenizer_repository,
+        "revision": tokenizer_revision,
+        "tokenizer_json_sha256": tokenizer_sha256,
+        "runtime_version": tokenizer_runtime,
+    }
+    recipe["chunking_recipe"] = {
+        "version": chunking_version,
+        "strategy": "tokenizer-offset-contiguous-nonoverlap",
+        "context_tokens": recipe["context_tokens"],
+        "overlap_tokens": 0,
+        "offset_unit": "python-codepoints-half-open",
+    }
+    canonical = json.dumps(
+        {key: value for key, value in recipe.items() if key != "recipe_fingerprint"},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    recipe["recipe_fingerprint"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return recipe
 
 
 class KnowledgeError(Exception):
@@ -396,8 +439,8 @@ def import_preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _private_state_summary(db: sqlite3.Connection) -> dict[str, Any]:
-    state = db.execute("SELECT state,generation,indexed_chunks,vector_state,vector_chunks FROM knowledge_es_state WHERE id=1").fetchone()
-    return dict(state) if state else {"state": "stale", "generation": 0, "indexed_chunks": 0, "vector_state": "not_indexed", "vector_chunks": 0}
+    state = db.execute("SELECT state,generation,indexed_chunks,vector_state,vector_chunks,vector_profile_id,vector_profile_recipe FROM knowledge_es_state WHERE id=1").fetchone()
+    return dict(state) if state else {"state": "stale", "generation": 0, "indexed_chunks": 0, "vector_state": "not_indexed", "vector_chunks": 0, "vector_profile_id": embeddings.DEFAULT_PROFILE_ID, "vector_profile_recipe": ""}
 
 
 def import_commit(payload: dict[str, Any]) -> dict[str, Any]:
@@ -726,6 +769,61 @@ def _owner_alias() -> str:
     return validate_index(private_alias(owner))
 
 
+def _profile_state(db: sqlite3.Connection) -> tuple[str, dict[str, Any]]:
+    row = db.execute("SELECT vector_profile_id,vector_profile_recipe FROM knowledge_es_state WHERE id=1").fetchone()
+    profile_id = str(row["vector_profile_id"] or embeddings.DEFAULT_PROFILE_ID) if row else embeddings.DEFAULT_PROFILE_ID
+    try:
+        embeddings.profile_spec(profile_id)
+    except (ValueError, TypeError):
+        # Unknown saved profiles fail closed; never reinterpret their vectors as E5.
+        return profile_id, {}
+    try:
+        recipe = json.loads(row["vector_profile_recipe"]) if row and row["vector_profile_recipe"] else _private_profile_recipe(profile_id)
+    except Exception:
+        recipe = {}
+    return profile_id, recipe if isinstance(recipe, dict) else {}
+
+
+def _save_profile_selection(profile_id: str) -> dict[str, Any]:
+    try:
+        recipe = _private_profile_recipe(profile_id)
+    except (ValueError, TypeError) as exc:
+        raise KnowledgeError("Unknown private embedding profile") from None
+    encoded = json.dumps(recipe, sort_keys=True, separators=(",", ":"))
+    with concepts._connect_db() as db:
+        _schema(db)
+        row = db.execute("SELECT vector_profile_id,vector_profile_recipe FROM knowledge_es_state WHERE id=1").fetchone()
+        previous_id = str(row["vector_profile_id"] or embeddings.DEFAULT_PROFILE_ID)
+        previous_recipe = str(row["vector_profile_recipe"] or "")
+        if previous_id != profile_id or (previous_recipe and previous_recipe != encoded):
+            db.execute("UPDATE knowledge_es_state SET vector_profile_id=?,vector_profile_recipe=?,vector_state='stale' WHERE id=1", (profile_id, encoded))
+        elif not previous_recipe:
+            db.execute("UPDATE knowledge_es_state SET vector_profile_id=?,vector_profile_recipe=? WHERE id=1", (profile_id, encoded))
+    return recipe
+
+
+def _recipe_profile_id(recipe: Any) -> str | None:
+    if not isinstance(recipe, dict):
+        return None
+    if recipe.get("profile_id") in {profile["profile_id"] for profile in embeddings.list_profiles()}:
+        return str(recipe["profile_id"])
+    # Historical generations predate the profile id but uniquely identify E5.
+    if recipe == LEGACY_E5_VECTOR_RECIPE:
+        return embeddings.DEFAULT_PROFILE_ID
+    return None
+
+
+def _vector_mapping_matches(mapping: dict[str, Any], profile_id: str, recipe: dict[str, Any]) -> bool:
+    spec = embeddings.profile_spec(profile_id)
+    field = mapping.get("properties", {}).get("rag_embedding", {})
+    mapped_recipe = mapping.get("_meta", {}).get("private_vector_recipe")
+    if field.get("type") != "dense_vector" or field.get("dims") != spec["dimensions"] or field.get("similarity") != spec["similarity"] or field.get("index") is not True:
+        return False
+    if mapped_recipe == recipe:
+        return True
+    return profile_id == embeddings.DEFAULT_PROFILE_ID and mapped_recipe == LEGACY_E5_VECTOR_RECIPE
+
+
 def es_status(connection: Connection | None = None) -> dict[str, Any]:
     alias = _owner_alias()
     with concepts._connect_db() as db:
@@ -733,6 +831,7 @@ def es_status(connection: Connection | None = None) -> dict[str, Any]:
         state = dict(db.execute("SELECT * FROM knowledge_es_state WHERE id=1").fetchone())
         chunks = int(db.execute("SELECT COUNT(*) FROM knowledge_chunks").fetchone()[0])
         docs = int(db.execute("SELECT COUNT(*) FROM knowledge_documents").fetchone()[0])
+        profile_id, selected_recipe = _profile_state(db)
     # GET without ES credentials reports persisted sync metadata and local
     # fingerprint only. Search/sync pass a connection and verify the alias.
     expected_alias_state = True
@@ -757,7 +856,12 @@ def es_status(connection: Connection | None = None) -> dict[str, Any]:
     recipe_ok = False
     if state["vector_recipe"]:
         try:
-            recipe_ok = json.loads(state["vector_recipe"]) == PRIVATE_VECTOR_RECIPE
+            active_recipe = json.loads(state["vector_recipe"])
+            recipe_ok = bool(selected_recipe) and active_recipe == selected_recipe
+            if not recipe_ok and profile_id == embeddings.DEFAULT_PROFILE_ID and active_recipe == LEGACY_E5_VECTOR_RECIPE:
+                recipe_ok = True
+            if _recipe_profile_id(active_recipe) != profile_id:
+                recipe_ok = False
         except Exception:
             recipe_ok = False
     if vector_state == "in_sync" and not recipe_ok:
@@ -769,12 +873,29 @@ def es_status(connection: Connection | None = None) -> dict[str, Any]:
             mappings = request(connection, "GET", f"{quote(alias, safe='')}/_mapping")
             mapping = next(iter(mappings.values())).get("mappings", {})
             mapped_recipe = mapping.get("_meta", {}).get("private_vector_recipe")
-            field = mapping.get("properties", {}).get("rag_embedding", {})
-            if field.get("type") != "dense_vector" or field.get("dims") != embeddings.MODEL_DIMENSIONS or field.get("similarity") != "cosine" or field.get("index") is not True or mapped_recipe != PRIVATE_VECTOR_RECIPE:
+            if not _vector_mapping_matches(mapping, profile_id, selected_recipe):
                 vector_state = "mapping_unavailable"
         except Exception:
             vector_state = "mapping_unavailable"
-    return {"state": status, "alias": alias, "local_documents": docs, "local_chunks": chunks, "indexed_chunks": state["indexed_chunks"], "last_synced_at": state["last_synced_at"], "error": state["error"], "vector_state": vector_state, "vector_chunks": state["vector_chunks"], "vector_recipe": PRIVATE_VECTOR_RECIPE, "tokenizer": token_preview.status()}
+    runtime = embeddings.runtime_status(profile_id) if profile_id in {item["profile_id"] for item in embeddings.list_profiles()} else {"profile_id": profile_id, "status": "unknown_profile"}
+    if profile_id == embeddings.DEFAULT_PROFILE_ID:
+        tokenizer_status = token_preview.status()
+    else:
+        try:
+            tokenizer_runtime = package_version("tokenizers")
+        except PackageNotFoundError:
+            tokenizer_runtime = None
+        tokenizer_installed = tokenizer_runtime is not None
+        tokenizer_status = {
+            "available": bool(runtime.get("model_cached") and tokenizer_installed),
+            "tokenizers_installed": tokenizer_installed,
+            "tokenizers_version": tokenizer_runtime,
+            "cached": bool(runtime.get("model_cached")),
+            "model": runtime.get("model_name"),
+            "revision": runtime.get("source_revision"),
+            "max_tokens": selected_recipe.get("context_tokens"),
+        }
+    return {"state": status, "alias": alias, "local_documents": docs, "local_chunks": chunks, "indexed_chunks": state["indexed_chunks"], "last_synced_at": state["last_synced_at"], "error": state["error"], "vector_state": vector_state, "vector_chunks": state["vector_chunks"], "vector_profile_id": profile_id, "vector_profile_recipe": selected_recipe, "vector_profile_status": runtime, "vector_recipe": selected_recipe, "tokenizer": tokenizer_status}
 
 
 def _local_fingerprint() -> str:
@@ -788,33 +909,111 @@ def _fingerprint_db(db: sqlite3.Connection) -> str:
     return _hash([tuple(row) for row in rows])
 
 
-def _vector_passages(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
-    """Split every BM25 chunk into complete tokenizer-bounded source slices."""
-    status = token_preview.status()
-    if not status.get("available"):
-        raise KnowledgeError(status.get("reason") or "Install the token-preview extra and prepare the pinned tokenizer before vector sync.", 503)
+def _profile_tokenizer(profile_id: str) -> Any:
+    if profile_id == embeddings.DEFAULT_PROFILE_ID:
+        status = token_preview.status()
+        if not status.get("available"):
+            status = token_preview.prepare()
+        if not status.get("available"):
+            raise KnowledgeError(status.get("reason") or "Install the token-preview extra and prepare the pinned tokenizer before vector sync.", 503)
+        # E5 slicing uses the pinned preview's exact offsets directly.
+        return None
+    profile = embeddings.profile_recipe(profile_id)
+    revision = profile.get("source_revision")
+    if not revision:
+        raise KnowledgeError("The selected embedding profile is not cached locally; explicit vector sync must prepare it before tokenizing passages.", 503)
+    try:
+        from tokenizers import Tokenizer
+        tokenizer_path = embeddings.cached_file_path(profile_id, "tokenizer.json")
+        if tokenizer_path is None:
+            raise FileNotFoundError("cached tokenizer is missing")
+        tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        # Model tokenizer.json may carry a max-length truncation rule. Passage
+        # boundaries and query-length checks need the full token sequence so
+        # overlong input is split or rejected explicitly, never undercounted.
+        tokenizer.no_truncation()
+        return tokenizer
+    except Exception:
+        raise KnowledgeError("The selected profile tokenizer is unavailable in its verified local model cache; no generation was published.", 503) from None
+
+
+def _profile_text_chunks(source: str, profile_id: str, tokenizer: Any, context_tokens: int) -> list[tuple[int, int]]:
+    if profile_id == embeddings.DEFAULT_PROFILE_ID:
+        offset = 0
+        chunks = []
+        while offset < len(source):
+            remainder = source[offset:]
+            preview = token_preview.preview_input(embeddings.format_embedding_input(remainder, "passage", profile_id))
+            if not preview.get("available"):
+                raise KnowledgeError("Pinned tokenizer could not safely inspect a passage; no vector generation was published.", 503)
+            cut = len(remainder) if not preview.get("truncated") else int(preview.get("cut_char_offset", 0)) - len("passage: ")
+            if cut <= 0 or cut > len(remainder):
+                raise KnowledgeError("Pinned tokenizer could not produce a safe passage boundary; no vector generation was published.", 503)
+            piece = remainder[:cut]
+            checked = token_preview.preview_input(embeddings.format_embedding_input(piece, "passage", profile_id))
+            if not checked.get("available") or checked.get("truncated"):
+                raise KnowledgeError("A private passage exceeds the verified profile context; no vector generation was published.", 503)
+            chunks.append((offset, offset + len(piece)))
+            offset += len(piece)
+        return chunks
+
+    spans = _encode_offsets(tokenizer, source)
+    if not spans:
+        raise KnowledgeError("The selected tokenizer returned no source offsets; no vector generation was published.", 503)
+    chunks: list[tuple[int, int]] = []
+    token_index = 0
+    start_offset = 0
+    while token_index < len(spans):
+        end_index = min(len(spans), token_index + context_tokens)
+        end_offset = spans[end_index - 1][1]
+        while end_offset > start_offset and _profile_token_count(tokenizer, embeddings.format_embedding_input(source[start_offset:end_offset], "passage", profile_id)) > context_tokens:
+            end_index -= 1
+            if end_index <= token_index:
+                raise KnowledgeError("The selected profile context is too small for a passage; no generation was published.", 503)
+            end_offset = spans[end_index - 1][1]
+        if end_offset <= start_offset:
+            raise KnowledgeError("The selected tokenizer did not advance through the source; no generation was published.", 503)
+        chunks.append((start_offset, end_offset))
+        if end_offset >= len(source):
+            break
+        token_index = end_index
+        start_offset = end_offset
+    if chunks[-1][1] < len(source):
+        end = len(source)
+        if _profile_token_count(tokenizer, embeddings.format_embedding_input(source[chunks[-1][0]:end], "passage", profile_id)) > context_tokens:
+            raise KnowledgeError("Trailing source text exceeds the selected profile context; no generation was published.", 503)
+        chunks[-1] = (chunks[-1][0], end)
+    return chunks
+
+
+def _encode_offsets(tokenizer: Any, text: str) -> list[tuple[int, int]]:
+    try:
+        encoded = tokenizer.encode(text, add_special_tokens=True)
+    except TypeError:
+        encoded = tokenizer.encode(text)
+    return [tuple(map(int, offset)) for offset in encoded.offsets if tuple(offset) != (0, 0)]
+
+
+def _profile_token_count(tokenizer: Any, text: str) -> int:
+    try:
+        encoded = tokenizer.encode(text, add_special_tokens=True)
+    except TypeError:
+        encoded = tokenizer.encode(text)
+    return len(encoded.ids)
+
+
+def _vector_passages(rows: list[sqlite3.Row], profile_id: str = embeddings.DEFAULT_PROFILE_ID,
+                     tokenizer: Any = None) -> list[dict[str, Any]]:
+    """Split each BM25 chunk into complete profile-context source slices."""
+    spec = embeddings.profile_spec(profile_id)
+    tokenizer = tokenizer or _profile_tokenizer(profile_id)
     passages: list[dict[str, Any]] = []
     for row in rows:
         source = str(row["content"])
-        offset = 0
-        ordinal = 0
-        while offset < len(source):
-            remainder = source[offset:]
-            preview = token_preview.preview_input(embeddings.format_embedding_input(remainder, "passage"))
-            if not preview.get("available"):
-                raise KnowledgeError(preview.get("reason") or "Pinned tokenizer could not safely inspect a passage; no vector generation was published.", 503)
-            cut = len(remainder) if not preview.get("truncated") else int(preview.get("cut_char_offset", 0)) - len("passage: ")
-            if cut <= 0 or cut > len(remainder):
-                raise KnowledgeError("Pinned tokenizer could not produce a safe 512-token passage boundary; no vector generation was published.", 503)
-            piece = remainder[:cut]
-            # Independently check the exact role-prefixed text that will be embedded.
-            checked = token_preview.preview_input(embeddings.format_embedding_input(piece, "passage"))
-            if not checked.get("available") or checked.get("truncated"):
-                raise KnowledgeError("A private passage exceeds the verified E5 512-token limit; no vector generation was published.", 503)
-            passages.append({"document_id": row["document_id"], "chunk_id": row["chunk_id"], "ordinal": row["ordinal"], "passage_ordinal": ordinal, "start_offset": int(row["start_offset"]) + offset, "end_offset": int(row["start_offset"]) + offset + len(piece), "text": piece})
-            offset += len(piece)
-            ordinal += 1
-        if offset != len(source):
+        slices = _profile_text_chunks(source, profile_id, tokenizer, int(spec["context_tokens"]))
+        for ordinal, (start, end) in enumerate(slices):
+            passages.append({"document_id": row["document_id"], "chunk_id": row["chunk_id"], "ordinal": row["ordinal"], "passage_ordinal": ordinal, "start_offset": int(row["start_offset"]) + start, "end_offset": int(row["start_offset"]) + end, "text": source[start:end]})
+        if not slices or slices[0][0] != 0 or slices[-1][1] != len(source) or any(left[1] != right[0] for left, right in zip(slices, slices[1:])):
             raise KnowledgeError("Private vector chunk coverage check failed; no vector generation was published.", 503)
     return passages
 
@@ -830,6 +1029,7 @@ class _BulkFailure(Exception):
 
 
 def _sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False,
+             profile_id: str | None = None,
              progress: Any = None, cancel_check: Any = None, publish_lock: threading.Lock | None = None,
              on_published: Any = None) -> dict[str, Any]:
     alias = _owner_alias()
@@ -842,25 +1042,46 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
         rows = db.execute("SELECT d.id document_id,d.title,d.source_label,c.id chunk_id,c.ordinal,c.start_offset,c.end_offset,c.content FROM knowledge_documents d JOIN knowledge_chunks c ON c.document_id=d.id ORDER BY d.id,c.ordinal").fetchall()
     passages: list[dict[str, Any]] = []
     vectors: list[list[float]] = []
-    recipe = ""
+    recipe: Any = ""
+    profile_id = profile_id or state.get("vector_profile_id") or embeddings.DEFAULT_PROFILE_ID
+    if vector:
+        try:
+            profile = embeddings.profile_spec(profile_id)
+        except (ValueError, TypeError):
+            raise KnowledgeError("Unknown private embedding profile") from None
+    else:
+        profile = None
     if vector:
         if allow_model_download is not True:
-            raise KnowledgeError("Vector sync requires explicit consent to download/cache the E5 model (about 2.24 GB) when it is not already cached.", 400)
-        tokenizer_status = token_preview.status()
-        if not tokenizer_status.get("available"):
-            tokenizer_status = token_preview.prepare()
-        if not tokenizer_status.get("available"):
-            raise KnowledgeError(tokenizer_status.get("reason") or "Install the token-preview extra and prepare the pinned tokenizer before vector sync.", 503)
-        passages = _vector_passages(rows)
+            raise KnowledgeError(f"Vector sync requires explicit consent to download/cache the {profile['model_name']} profile if it is not already cached.", 400)
+        _save_profile_selection(profile_id)
+        tokenizer = None
+        if profile_id == embeddings.DEFAULT_PROFILE_ID:
+            tokenizer_status = token_preview.status()
+            if not tokenizer_status.get("available"):
+                tokenizer_status = token_preview.prepare()
+            if not tokenizer_status.get("available"):
+                raise KnowledgeError(tokenizer_status.get("reason") or "Install the token-preview extra and prepare the pinned tokenizer before vector sync.", 503)
+            tokenizer = _profile_tokenizer(profile_id)
+        elif rows:
+            try:
+                embeddings._model(profile_id, local_files_only=False)
+                tokenizer = _profile_tokenizer(profile_id)
+            except ElasticsearchError:
+                raise KnowledgeError(f"The {profile['model_name']} profile could not be prepared. Check its optional runtime/cache and retry; no generation was published.", 503) from None
+        passages = _vector_passages(rows, profile_id, tokenizer) if rows else []
         try:
-            vectors = embeddings.embed_texts([item["text"] for item in passages], "passage", local_files_only=False)
+            vectors = embeddings.embed_texts([item["text"] for item in passages], "passage", local_files_only=False, profile_id=profile_id)
         except ElasticsearchError:
-            if not embeddings.runtime_status().get("runtime_installed"):
+            if not embeddings.runtime_status(profile_id).get("runtime_installed"):
                 raise KnowledgeError("FastEmbed is not installed. Install `.[private-vector]` and retry vector sync; BM25 remains available.", 503) from None
-            raise KnowledgeError("The local E5 model could not be loaded or passages could not be embedded. Check network/cache access and retry; no new generation was published.", 503) from None
+            raise KnowledgeError(f"The local {profile['model_name']} profile could not embed passages. Check its cache and retry; no new generation was published.", 503) from None
         if len(vectors) != len(passages):
-            raise KnowledgeError("The embedding runtime returned an incomplete vector batch; no vector generation was published.", 503)
-        recipe = json.dumps(PRIVATE_VECTOR_RECIPE, sort_keys=True, separators=(",", ":"))
+            raise KnowledgeError("The embedding runtime returned an incomplete vector batch; no new generation was published.", 503)
+        recipe = _private_profile_recipe(profile_id)
+        with concepts._connect_db() as db:
+            _schema(db)
+            db.execute("UPDATE knowledge_es_state SET vector_profile_id=?,vector_profile_recipe=? WHERE id=1", (profile_id, json.dumps(recipe, sort_keys=True, separators=(",", ":"))))
     with concepts._connect_db() as db:
         _schema(db)
         db.execute("UPDATE knowledge_es_state SET state='syncing',generation=?,error='' WHERE id=1", (generation,))
@@ -871,10 +1092,10 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
     try:
         properties = {"owner_id": {"type": "keyword"}, "document_id": {"type": "keyword"}, "chunk_id": {"type": "keyword"}, "title": {"type": "text"}, "source_label": {"type": "text"}, "rag_chunk_text": {"type": "text"}, "ordinal": {"type": "integer"}, "start_offset": {"type": "integer"}, "end_offset": {"type": "integer"}, "passage_ordinal": {"type": "integer"}}
         if vector:
-            properties["rag_embedding"] = {"type": "dense_vector", "dims": embeddings.MODEL_DIMENSIONS, "index": True, "similarity": "cosine"}
+            properties["rag_embedding"] = {"type": "dense_vector", "dims": profile["dimensions"], "index": True, "similarity": profile["similarity"]}
         mappings = {"properties": properties}
         if vector:
-            mappings["_meta"] = {"private_vector_recipe": PRIVATE_VECTOR_RECIPE}
+            mappings["_meta"] = {"private_vector_recipe": recipe}
         request(connection, "PUT", quote(target, safe=''), {"mappings": mappings})
         staged_items: list[tuple[dict[str, Any], dict[str, Any]]] = []
         if rows:
@@ -936,8 +1157,7 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
         if vector:
             staged_mappings = request(connection, "GET", f"{quote(target, safe='')}/_mapping")
             staged_mapping = next(iter(staged_mappings.values())).get("mappings", {})
-            staged_field = staged_mapping.get("properties", {}).get("rag_embedding", {})
-            if staged_field.get("type") != "dense_vector" or staged_field.get("dims") != embeddings.MODEL_DIMENSIONS or staged_field.get("similarity") != "cosine" or staged_field.get("index") is not True or staged_mapping.get("_meta", {}).get("private_vector_recipe") != PRIVATE_VECTOR_RECIPE:
+            if not _vector_mapping_matches(staged_mapping, profile_id, recipe):
                 raise ElasticsearchError("Staged private vector mapping or recipe does not match the requested generation", 503)
         try:
             old = request(connection, "GET", f"_alias/{quote(alias, safe='')}")
@@ -974,7 +1194,7 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
             current = _fingerprint_db(db)
             if current != fingerprint:
                 raise ElasticsearchError("Local knowledge changed during indexing; retry synchronization", 409)
-            db.execute("UPDATE knowledge_es_state SET state='in_sync',generation=?,indexed_chunks=?,local_fingerprint=?,synced_fingerprint=?,last_synced_at=?,error='',vector_state=?,vector_recipe=?,vector_chunks=? WHERE id=1", (generation, len(rows), fingerprint, fingerprint, _now(), "in_sync" if vector else "not_indexed", recipe, len(passages) if vector else 0))
+            db.execute("UPDATE knowledge_es_state SET state='in_sync',generation=?,indexed_chunks=?,local_fingerprint=?,synced_fingerprint=?,last_synced_at=?,error='',vector_state=?,vector_recipe=?,vector_chunks=?,vector_profile_id=?,vector_profile_recipe=? WHERE id=1", (generation, len(rows), fingerprint, fingerprint, _now(), "in_sync" if vector else "not_indexed", json.dumps(recipe, sort_keys=True, separators=(",", ":")) if vector else "", len(passages) if vector else 0, profile_id, json.dumps(recipe, sort_keys=True, separators=(",", ":")) if vector else state.get("vector_profile_recipe", "")))
         result = es_status(connection)
         if on_published:
             on_published()
@@ -1012,7 +1232,8 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
         raise wrapped from None
 
 
-def sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False) -> dict[str, Any]:
+def sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False,
+             profile_id: str | None = None) -> dict[str, Any]:
     owner = concepts._OWNER_ID.get()
     if not owner:
         raise KnowledgeError("Authenticated account scope is required", 401)
@@ -1022,7 +1243,7 @@ def sync_es(connection: Connection, *, vector: bool = False, allow_model_downloa
         raise KnowledgeError("A private knowledge sync is already running for this account. Retry after it finishes.", 409)
     try:
         with private_sync_scope():
-            return _sync_es(connection, vector=vector, allow_model_download=allow_model_download)
+            return _sync_es(connection, vector=vector, allow_model_download=allow_model_download, profile_id=profile_id)
     finally:
         lock.release()
 
@@ -1270,13 +1491,16 @@ def search_es(connection: Connection, query: str, limit: int = 10) -> dict[str, 
         return {"state": "in_sync", "mode": "bm25", "results": [{"_index": alias, "_id": hit.get("_id"), "_score": hit.get("_score"), "_source": hit.get("_source", {}), "private_knowledge": True} for hit in hits]}
 
 
-def search_es_mode(connection: Connection, query: str, mode: str, limit: int = 10) -> dict[str, Any]:
+def search_es_mode(connection: Connection, query: str, mode: str, limit: int = 10,
+                   profile_id: str | None = None) -> dict[str, Any]:
     if mode == "bm25":
         return search_es(connection, query, limit)
     if mode not in {"vector", "hybrid"}:
         raise KnowledgeError("Private search mode must be bm25, vector, or hybrid")
     with private_read_scope():
         status = es_status(connection)
+        if profile_id is not None and profile_id != status.get("vector_profile_id"):
+            return {"state": "profile_mismatch", "mode": mode, "results": [], "message": "The requested vector profile does not match the profile saved for this account."}
         if status["local_chunks"] == 0:
             return {"state": "empty", "mode": mode, "results": [], "message": "No private knowledge documents are saved."}
         if status["state"] != "in_sync":
@@ -1287,20 +1511,34 @@ def search_es_mode(connection: Connection, query: str, mode: str, limit: int = 1
         if not owner:
             raise KnowledgeError("Authenticated account scope is required", 401)
         alias = _owner_alias()
-        model_status = embeddings.runtime_status()
+        selected_profile = str(status["vector_profile_id"])
+        try:
+            profile_spec = embeddings.profile_spec(selected_profile)
+        except (ValueError, TypeError):
+            return {"state": "profile_unavailable", "mode": mode, "results": [], "message": "The saved private embedding profile is unknown. Select a supported profile and sync again."}
+        model_status = embeddings.runtime_status(selected_profile)
         if not model_status.get("runtime_installed"):
             return {"state": "model_unavailable", "mode": mode, "results": [], "message": "Install the private-vector extra before searching private vectors. Private BM25 remains available."}
         if not model_status.get("model_cached"):
-            return {"state": "model_unavailable", "mode": mode, "results": [], "message": "The E5 model cache is missing. Run explicit vector sync again and consent to restore it; search will not download it."}
-        tokenizer_status = token_preview.status()
-        if not tokenizer_status.get("available"):
-            return {"state": "tokenizer_unavailable", "mode": mode, "results": [], "message": "The pinned E5 tokenizer cache is missing or unavailable. Run explicit vector sync again to verify or prepare it."}
-        query_check = token_preview.preview_input(embeddings.format_embedding_input(query, "query"))
-        if not query_check.get("available"):
-            return {"state": "tokenizer_unavailable", "mode": mode, "results": [], "message": "The pinned E5 tokenizer could not safely check the query; private vector results are withheld."}
-        if query_check.get("truncated"):
-            return {"state": "query_too_long", "mode": mode, "results": [], "message": "This query exceeds the E5 512-token limit. Shorten the query; it will not be silently truncated."}
-        query_vector = embeddings.embed_texts([query], "query", local_files_only=True)[0]
+            return {"state": "model_unavailable", "mode": mode, "results": [], "message": f"The {profile_spec['model_name']} model cache is missing. Run explicit vector sync again and consent to restore it; search will not download it."}
+        if selected_profile == embeddings.DEFAULT_PROFILE_ID:
+            tokenizer_status = token_preview.status()
+            if not tokenizer_status.get("available"):
+                return {"state": "tokenizer_unavailable", "mode": mode, "results": [], "message": "The pinned E5 tokenizer cache is missing or unavailable. Run explicit vector sync again to verify or prepare it."}
+            query_check = token_preview.preview_input(embeddings.format_embedding_input(query, "query", selected_profile))
+            if not query_check.get("available"):
+                return {"state": "tokenizer_unavailable", "mode": mode, "results": [], "message": "The pinned E5 tokenizer could not safely check the query; private vector results are withheld."}
+            if query_check.get("truncated"):
+                return {"state": "query_too_long", "mode": mode, "results": [], "message": "This query exceeds the E5 512-token limit. Shorten the query; it will not be silently truncated."}
+        else:
+            try:
+                tokenizer = _profile_tokenizer(selected_profile)
+                query_count = _profile_token_count(tokenizer, embeddings.format_embedding_input(query, "query", selected_profile))
+            except KnowledgeError:
+                return {"state": "tokenizer_unavailable", "mode": mode, "results": [], "message": "The selected profile tokenizer is unavailable locally. Run explicit vector sync to prepare and verify it."}
+            if query_count > int(profile_spec["context_tokens"]):
+                return {"state": "query_too_long", "mode": mode, "results": [], "message": f"This query exceeds the selected profile's {profile_spec['context_tokens']}-token context. Shorten it; it will not be silently truncated."}
+        query_vector = embeddings.embed_texts([query], "query", local_files_only=True, profile_id=selected_profile)[0]
         source_fields = ["document_id", "chunk_id", "title", "source_label", "rag_chunk_text", "ordinal", "start_offset", "end_offset"]
         vector_body = {"size": max(1, min(20, int(limit))), "knn": {"field": "rag_embedding", "query_vector": query_vector, "k": max(1, min(20, int(limit))), "num_candidates": min(10000, max(50, int(limit) * 10)), "filter": {"term": {"owner_id": owner}}}, "_source": source_fields}
         vector_result = request(connection, "POST", f"{quote(alias, safe='')}/_search", vector_body)

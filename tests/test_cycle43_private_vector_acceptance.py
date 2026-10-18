@@ -292,7 +292,7 @@ class Cycle43PrivateVectorAcceptance(unittest.TestCase):
         self.assertFalse(any(method == "PUT" for method, _, _ in FakeVectorElasticsearch.calls))
         calls = []
 
-        def embed(texts, role, *, local_files_only=False):
+        def embed(texts, role, *, local_files_only=False, profile_id=None):
             calls.append((list(texts), role, local_files_only))
             return [[1.0] + [0.0] * 1023 for _ in texts]
 
@@ -335,6 +335,9 @@ class Cycle43PrivateVectorAcceptance(unittest.TestCase):
         self.assertEqual(mapping["_meta"]["private_vector_recipe"], synced["vector_recipe"])
         self.assertIn("fastembed_version", synced["vector_recipe"])
         self.assertTrue(synced["vector_recipe"]["fastembed_version"])
+        self.assertIn("tokenizer", synced["vector_recipe"])
+        self.assertIn("chunking_recipe", synced["vector_recipe"])
+        self.assertEqual(synced["vector_recipe"]["chunking_recipe"]["context_tokens"], 512)
         indexed = FakeVectorElasticsearch.indexes[FakeVectorElasticsearch.aliases[expected_alias]]["documents"]
         self.assertEqual(len(indexed), len(passages))
         self.assertTrue(all(doc["owner_id"] == owner["id"] and len(doc["rag_embedding"]) == 1024 for doc in indexed.values()))

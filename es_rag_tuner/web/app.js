@@ -56,6 +56,12 @@ const state = {
   bestProfile: null,
   embedding: null,
   embeddingIndex: "",
+  embeddingProfiles: [],
+  sharedProfileId: "e5-multilingual-large",
+  privateProfileId: "e5-multilingual-large",
+  privateSavedProfileId: "e5-multilingual-large",
+  privateTokenizerStatus: null,
+  privateProfileTouched: false,
   sampleExpectedCount: 0,
   codebaseStatus: null,
   conceptId: null,
@@ -206,6 +212,14 @@ function applyLocale(locale) {
   $$('[data-i18n]').forEach(node => { const value = copy(node.dataset.i18n); if (value) node.textContent = value; });
   $("#es-url").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch endpoint URL" : "Elasticsearch endpoint 주소");
   $("#index-name").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch index name" : "Elasticsearch 인덱스 이름");
+  const sharedProfileLabel = document.querySelector('label[for="embedding-profile-select"]');
+  if (sharedProfileLabel) sharedProfileLabel.textContent = state.locale === "en" ? "Shared index embedding profile" : "공유 인덱스 임베딩 프로필";
+  const privateProfileLabel = document.querySelector('label[for="knowledge-vector-profile-select"]');
+  if (privateProfileLabel) privateProfileLabel.textContent = state.locale === "en" ? "Private vector profile" : "비공개 벡터 프로필";
+  const sharedProfileHelp = $("#embedding-profile-help");
+  if (sharedProfileHelp) sharedProfileHelp.textContent = state.locale === "en"
+    ? "The selected profile recipe must match the indexed vectors before retrieval."
+    : "선택한 프로필과 색인 벡터의 recipe 지문이 일치해야 검색할 수 있습니다.";
   $("#connection-profile-name").placeholder = state.locale === "en" ? "Profile name" : "프로필 이름";
   $("#connect-button").lastChild.textContent = ` ${copy("connectLabel")}`;
   const { keys, index, identity } = state.connectionGuidance;
@@ -215,6 +229,8 @@ function applyLocale(locale) {
   if (state.quickstart) renderQuickstartResult(state.quickstart);
   if (state.quickstartAppliedFields) renderAppliedQuickstartFields();
   renderConnectionProfiles?.();
+  renderEmbeddingProfileDetails();
+  if (state.embedding) renderEmbeddingStatus(state.embedding);
   if (state.lastSearch?.result && state.lastSearch.mode !== "code_rag") renderSearch(state.lastSearch.result, state.lastSearch.query);
   if (state.preview && state.preview.queryId) renderConceptPreview(state.preview, state.preview.queryId);
   if (state.preview?.queryId) $("#concept-preview-status").textContent = `${state.locale === "en" ? "Search complete" : "비교 완료"} · ${state.preview.query || (state.locale === "en" ? "Saved query" : "저장된 질의")}`;
@@ -445,7 +461,8 @@ function setConnected(enabled) {
   $("#evaluate-button").disabled = !enabled;
   $("#tune-button").disabled = !enabled;
   $("#load-sample-button").disabled = !enabled || !state.canImportSample;
-  $("#vectorize-button").disabled = !enabled || !state.embedding?.mapping_available || state.embedding.mapping_dimensions !== 1024 || state.embedding.vector_count >= state.embedding.document_count;
+  const selectedDimensions = Number(selectedEmbeddingProfile()?.dimensions || 1024);
+  $("#vectorize-button").disabled = !enabled || !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== selectedDimensions || state.embedding.mapping_compatible === false || !state.embedding.runtime_installed || state.embedding.vector_count >= state.embedding.document_count;
   $("#concept-preview").disabled = !enabled;
   $("#concept-tune").disabled = !enabled;
   $("#refresh-schema").disabled = !enabled;
@@ -540,6 +557,7 @@ async function connect() {
   state.connectionAttemptInProgress = true;
   const button = $("#connect-button");
   const refreshButton = $("#refresh-indices");
+  state.sharedProfileId = $("#embedding-profile-select")?.value || state.sharedProfileId || "e5-multilingual-large";
   button.disabled = true;
   refreshButton.disabled = true;
   advanceConnectionGeneration();
@@ -557,7 +575,8 @@ async function connect() {
   setConnectionGuidance(["checking"]);
   $("#cluster-summary").classList.add("hidden");
   try {
-    const result = await api("/api/connect", requestPayload());
+    const result = await api("/api/connect", requestPayload({ profile_id: state.sharedProfileId }));
+    await loadEmbeddingProfiles();
     state.indices = result.indices || [];
     state.embedding = result.embedding || null;
     state.embeddingIndex = result.selected_index || $("#index-name").value.trim();
@@ -584,7 +603,8 @@ async function connect() {
     renderSampleStatus(sample);
     renderEmbeddingStatus(state.embedding);
     const empty = !result.selected_index_exists || Number(result.selected_index_count) === 0;
-    const vectorNotReady = !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== 1024 || !state.embedding?.runtime_installed || (Number(state.embedding?.document_count) > 0 && Number(state.embedding?.vector_count) === 0);
+    const selectedDimensions = Number(selectedEmbeddingProfile()?.dimensions || 1024);
+    const vectorNotReady = !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== selectedDimensions || state.embedding.mapping_compatible === false || !state.embedding?.runtime_installed || (Number(state.embedding?.document_count) > 0 && Number(state.embedding?.vector_count) === 0);
     const guidanceKeys = [empty ? "emptyIndex" : "ready", ...(vectorNotReady ? ["vectorUnavailable"] : []), ...(!result.selected_index_exists ? ["sampleOptional"] : [])];
     const identity = state.sampleImportedTarget === sampleTargetKey($("#es-url").value, result.selected_index) ? "sample" : result.selected_index_exists ? "realIndex" : "newIndex";
     setConnectionGuidance(guidanceKeys, result.selected_index, identity);
@@ -625,30 +645,137 @@ async function connect() {
 function renderEmbeddingStatus(info) {
   const status = $("#embedding-status");
   if (!info) { renderSearchReadiness(); return; }
+  const english = state.locale === "en";
+  const profile = selectedEmbeddingProfile();
+  const dimensions = Number(profile?.dimensions || info.profile_dimensions || 1024);
+  const profileName = profile?.model_name || info.model_name || state.sharedProfileId;
   $("#sample-document-count").textContent = Number(info.document_count || 0).toLocaleString();
   $("#embedding-count").textContent = Number(info.vector_count || 0).toLocaleString();
   if (!info.mapping_available) {
     status.className = "notice notice-muted";
-    status.textContent = "선택한 인덱스에 1024차원 rag_embedding 매핑이 없습니다. 제공 샘플 인덱스를 사용하거나 매핑을 준비하세요.";
-  } else if (Number(info.mapping_dimensions) !== 1024) {
+    status.textContent = english
+      ? `The selected index has no ${dimensions}-dimension rag_embedding mapping. Use the supplied sample index or prepare a mapping for this profile.`
+      : `선택한 인덱스에 ${dimensions}차원 rag_embedding 매핑이 없습니다. 제공 샘플 인덱스를 사용하거나 선택한 프로필의 매핑을 준비하세요.`;
+  } else if (info.mapping_compatible === false) {
+    status.className = "notice notice-error";
+    status.textContent = `${english
+      ? `Stored vector recipe does not match ${profileName} (${dimensions}d); index mapping is ${info.mapping_dimensions}d. Different embedding spaces are incompatible.`
+      : `기존 벡터의 recipe가 ${profileName} (${dimensions}차원) 프로필과 다릅니다. 현재 매핑은 ${info.mapping_dimensions}차원이며 다른 임베딩 공간은 호환되지 않습니다.`}${info.mapping_error ? ` · ${info.mapping_error}` : ""}`;
+    status.title = info.mapping_error || "";
+  } else if (Number(info.mapping_dimensions) !== dimensions) {
     status.className = "notice notice-muted";
-    status.textContent = `rag_embedding 매핑은 ${info.mapping_dimensions}차원입니다. 현재 ${info.model_name} 모델과 일치하지 않아 벡터 임베딩을 만들 수 없습니다.`;
+    status.textContent = english
+      ? `rag_embedding is ${info.mapping_dimensions}d, but ${profileName} requires ${dimensions}d. Vector work is unavailable.`
+      : `rag_embedding 매핑은 ${info.mapping_dimensions}차원입니다. ${profileName} 프로필은 ${dimensions}차원이므로 벡터 작업을 할 수 없습니다.`;
   } else if (!info.runtime_installed) {
     status.className = "notice notice-muted";
-    status.innerHTML = `dense_vector ${escapeHtml(info.mapping_dimensions)}차원 준비됨 · FastEmbed 런타임 설치 필요<br><code>${escapeHtml(info.install_command)}</code>`;
+    status.innerHTML = `${english ? "dense_vector" : "dense_vector"} ${escapeHtml(info.mapping_dimensions)}${english ? "d ready · install FastEmbed runtime" : "차원 준비됨 · FastEmbed 런타임 설치 필요"}<br><code>${escapeHtml(info.install_command)}</code>`;
   } else if (!info.model_cached) {
     status.className = "notice notice-muted";
-    status.textContent = `매핑 준비됨 · ${info.model_name} 모델은 첫 임베딩 실행 시 다운로드됩니다 (약 2.24GB).`;
+    status.textContent = english
+      ? `Mapping ready · ${profileName} can be downloaded into the local cache after explicit consent for vectorization or the first query.`
+      : `매핑 준비됨 · ${profileName} 모델은 동의한 벡터 생성 또는 첫 질의에서 로컬 캐시에 내려받을 수 있습니다.`;
   } else if (info.vector_count >= info.document_count && info.document_count > 0) {
     status.className = "notice notice-success";
-    status.textContent = `${info.vector_count}개 문서 임베딩 완료 · ${info.model_name}`;
+    status.textContent = english
+      ? `${info.vector_count} documents have vectors · ${profileName} · ${dimensions}d`
+      : `${info.vector_count}개 문서 임베딩 완료 · ${profileName} · ${dimensions}차원`;
   } else {
     status.className = "notice notice-muted";
-    status.textContent = `${info.vector_count}/${info.document_count}개 문서에 임베딩이 있습니다 · ${info.model_name}`;
+    status.textContent = english
+      ? `${info.vector_count}/${info.document_count} documents have vectors · ${profileName} · ${dimensions}d`
+      : `${info.vector_count}/${info.document_count}개 문서에 임베딩이 있습니다 · ${profileName} · ${dimensions}차원`;
   }
-  $("#vectorize-button").disabled = !state.connected || !info.mapping_available || Number(info.mapping_dimensions) !== 1024 || !info.runtime_installed || info.vector_count >= info.document_count;
-  $("#vectorize-button").textContent = info.model_cached ? "누락 임베딩 생성" : "임베딩 모델 다운로드 및 생성";
+  $("#vectorize-button").disabled = !state.connected || !info.mapping_available || Number(info.mapping_dimensions) !== dimensions || info.mapping_compatible === false || !info.runtime_installed || info.vector_count >= info.document_count;
+  $("#vectorize-button").textContent = info.model_cached
+    ? (english ? "Create missing vectors" : "누락 임베딩 생성")
+    : (english ? "Consent and download model" : "동의 후 모델 다운로드 및 생성");
   renderSearchReadiness();
+}
+
+function selectedEmbeddingProfile(profileId = state.sharedProfileId) {
+  return state.embeddingProfiles.find((profile) => profile.profile_id === profileId)
+    || ({
+      "e5-multilingual-large": { profile_id: "e5-multilingual-large", model_name: "intfloat/multilingual-e5-large", dimensions: 1024, max_tokens: 512, license: "mit" },
+      "paraphrase-multilingual-minilm-l12": { profile_id: "paraphrase-multilingual-minilm-l12", model_name: "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", dimensions: 384, max_tokens: 128, license: "apache-2.0" },
+    })[profileId] || null;
+}
+
+async function loadEmbeddingProfiles() {
+  try {
+    const response = await fetch("/api/embedding/profiles", { cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok || !Array.isArray(value.profiles)) return;
+    state.embeddingProfiles = value.profiles;
+    if (!$("#embedding-profile-select").dataset.touched) state.sharedProfileId = value.default_profile_id || state.sharedProfileId;
+    const renderOptions = (select, selectedId) => {
+      if (!select) return;
+      const prior = select.value || selectedId;
+      select.replaceChildren(...value.profiles.map((profile) => {
+        const option = document.createElement("option");
+        option.value = profile.profile_id;
+        const statusLabels = state.locale === "en"
+          ? { cached: "cached", model_not_cached: "model not cached", dependency_missing: "runtime missing", loading_failure: "load failed" }
+          : { cached: "캐시됨", model_not_cached: "모델 캐시 없음", dependency_missing: "런타임 설치 필요", loading_failure: "불러오기 실패" };
+        const dimensions = state.locale === "en" ? `${profile.dimensions}d` : `${profile.dimensions}차원`;
+        option.textContent = `${profile.model_name} · ${dimensions} · ${statusLabels[profile.setup_state] || profile.setup_state || (state.locale === "en" ? "status unknown" : "상태 확인 불가")}`;
+        return option;
+      }));
+      select.value = value.profiles.some((profile) => profile.profile_id === prior) ? prior : (value.default_profile_id || value.profiles[0]?.profile_id || "");
+    };
+    renderOptions($("#embedding-profile-select"), state.sharedProfileId);
+    renderOptions($("#knowledge-vector-profile-select"), state.privateProfileId);
+    state.sharedProfileId = $("#embedding-profile-select").value || state.sharedProfileId;
+    if (!state.privateProfileTouched) state.privateProfileId = $("#knowledge-vector-profile-select").value || state.privateProfileId;
+    renderEmbeddingProfileDetails();
+    if (state.embedding) renderEmbeddingStatus(state.embedding);
+  } catch { /* Profile discovery is supplemental; legacy E5 controls remain usable. */ }
+}
+
+function renderEmbeddingProfileDetails() {
+  const format = (profileId) => {
+    const profile = selectedEmbeddingProfile(profileId);
+    if (!profile) return state.locale === "en" ? "Profile details are unavailable." : "프로필 정보를 확인할 수 없습니다.";
+    const english = state.locale === "en";
+    const query = profile.query_prefix || (english ? "none" : "없음");
+    const passage = profile.passage_prefix || (english ? "none" : "없음");
+    const context = profile.max_tokens || profile.context_tokens || "?";
+    const revision = profile.source_revision || (english ? "resolved when cached" : "캐시 준비 시 확인");
+    const source = profile.source_repo || profile.recipe?.source_repo || (english ? "source unavailable" : "출처 확인 불가");
+    const fastembed = profile.fastembed_version || profile.recipe?.fastembed_version || "?";
+    const similarity = profile.similarity || profile.recipe?.similarity || "cosine";
+    const normalized = profile.normalized ?? profile.recipe?.normalized;
+    const fingerprint = profile.recipe_fingerprint || profile.recipe?.recipe_fingerprint || "";
+    const setup = profile.setup_state || profile.status || "unavailable";
+    const runtime = profile.runtime_installed ? (english ? "runtime installed" : "런타임 설치됨") : (english ? "runtime missing" : "런타임 없음");
+    const tokenizerRuntime = profile.tokenizer_runtime_installed == null
+      ? (english ? "tokenizer runtime status unavailable" : "tokenizer 런타임 상태 확인 불가")
+      : profile.tokenizer_runtime_installed
+        ? `${english ? "tokenizer runtime installed" : "tokenizer 런타임 설치됨"}${profile.tokenizer_runtime_version ? ` ${profile.tokenizer_runtime_version}` : ""}`
+        : (english ? "tokenizer runtime missing" : "tokenizer 런타임 없음");
+    const cached = profile.model_cached ? (english ? "model cached" : "모델 캐시됨") : (english ? "model not cached" : "모델 캐시 없음");
+    const stateMessages = english
+      ? { cached: "Model is ready locally.", model_not_cached: "Model is not cached; explicit consent is required before download.", dependency_missing: "Install the optional FastEmbed runtime.", loading_failure: "Model could not be loaded; check the local install and cache." }
+      : { cached: "로컬 모델이 준비되었습니다.", model_not_cached: "모델이 캐시에 없습니다. 다운로드 전에 명시적 동의가 필요합니다.", dependency_missing: "선택 FastEmbed 런타임을 설치하세요.", loading_failure: "모델을 불러오지 못했습니다. 설치와 캐시를 확인하세요." };
+    const safeMessage = stateMessages[setup] ? ` · ${stateMessages[setup]}` : "";
+    return state.locale === "en"
+      ? `Query prefix: ${query} · Passage prefix: ${passage} · Context: ${context} tokens · License: ${profile.license || "see model source"} · Source: ${source} · Revision: ${revision} · FastEmbed: ${fastembed} · ${tokenizerRuntime} · Similarity: ${similarity} · Normalized: ${normalized == null ? "unknown" : normalized} · Recipe: ${fingerprint || "not resolved"} · ${runtime} · ${cached} · Setup: ${setup}${safeMessage}`
+      : `질의 접두사: ${query} · 문서 접두사: ${passage} · 입력 한도: ${context}토큰 · 라이선스: ${profile.license || "모델 출처 확인"} · 출처: ${source} · revision: ${revision} · FastEmbed: ${fastembed} · ${tokenizerRuntime} · 유사도: ${similarity} · 정규화: ${normalized == null ? "확인 불가" : normalized ? "예" : "아니요"} · recipe 지문: ${fingerprint || "미확정"} · ${runtime} · ${cached} · 설정: ${setup}${safeMessage}`;
+  };
+  const shared = $("#embedding-profile-help");
+  if (shared) {
+    const guidance = state.locale === "en"
+      ? "The selected profile recipe must match the indexed vectors before retrieval. "
+      : "선택한 프로필과 색인 벡터의 recipe 지문이 일치해야 검색할 수 있습니다. ";
+    shared.textContent = guidance + format(state.sharedProfileId);
+  }
+  const privateHelp = $("#knowledge-vector-profile-help");
+  if (privateHelp) {
+    const guidance = state.locale === "en"
+      ? "This profile applies to the next explicitly approved private vector generation. "
+      : "이 프로필은 다음에 명시적으로 동의한 개인 벡터 generation에 적용됩니다. ";
+    privateHelp.textContent = guidance + format(state.privateProfileId);
+  }
 }
 
 function isVectorDependentMode(mode) {
@@ -659,12 +786,17 @@ function searchModeReadiness(mode = $("#search-mode").value) {
   if (!isVectorDependentMode(mode)) return { active: false, blocked: false, paragraphs: [], plain: "" };
   if (mode === "vector" || mode === "hybrid") {
     const info = state.embedding;
-    const sharedCanRun = !!(state.connected && info?.mapping_available && Number(info.mapping_dimensions) === 1024 && info.runtime_installed && Number(info.vector_count) > 0);
+    const profile = selectedEmbeddingProfile();
+    const dimensions = Number(profile?.dimensions || 1024);
+    const sharedCanRun = !!(state.connected && info?.mapping_available && Number(info.mapping_dimensions) === dimensions && info.mapping_compatible !== false && info.runtime_installed && Number(info.vector_count) > 0);
     const paragraphs = [
-      `${mode === "vector" ? "벡터" : "하이브리드"} 검색은 공유 인덱스와 내 비공개 지식 lane을 각각 시도합니다. 공유 인덱스에 벡터가 없거나 검색이 실패해도 비공개 lane은 계속 시도됩니다.`,
+      `${mode === "vector" ? "벡터" : "하이브리드"} 검색은 공유 인덱스에서 ${profile?.model_name || "선택한 임베딩 프로필"} (${dimensions}차원)를 사용하고, 내 비공개 지식은 저장된 개인 프로필을 사용합니다.`,
       "내 비공개 lane은 ‘내 지식’에서 명시적으로 벡터 동기화를 마친 경우에만 결과를 제공합니다. 모델 또는 매핑이 준비되지 않은 lane은 unavailable 상태로 표시됩니다.",
-      "공유 결과와 비공개 결과는 합쳐지지 않습니다. 검색 품질이나 계정 분리를 검증한 결과도 아닙니다.",
+      "공유 결과와 비공개 결과는 합쳐지지 않습니다. 모델·revision·prefix 지문이 다른 벡터는 차원이 같아도 함께 검색하지 않습니다.",
     ];
+    if (info?.mapping_compatible === false) paragraphs.push(state.locale === "en"
+      ? (info.mapping_error || "The shared index vector recipe does not match the selected profile.")
+      : "공유 인덱스의 벡터 recipe가 선택한 프로필과 다릅니다. 같은 차원이어도 다른 recipe는 함께 검색하지 않습니다.");
     return { active: true, blocked: false, requiresModelDownload: sharedCanRun && !info.model_cached, paragraphs, plain: paragraphs.join(" ") };
   }
   const selectedIndex = $("#index-name").value.trim();
@@ -692,11 +824,16 @@ function searchModeReadiness(mode = $("#search-mode").value) {
   if (!info.mapping_available) {
     paragraphs.push("rag_embedding 매핑이 없습니다. 벡터 검색은 사용할 수 없지만 BM25 검색은 계속 사용할 수 있습니다.");
     blocked = true;
-  } else if (Number(info.mapping_dimensions) !== 1024) {
-    paragraphs.push(`rag_embedding 매핑은 ${info.mapping_dimensions}차원이며 현재 벡터 모델은 1024차원을 요구합니다. 벡터가 필요한 검색은 사용할 수 없지만 BM25 검색은 계속 사용할 수 있습니다.`);
+  } else if (Number(info.mapping_dimensions) !== Number(selectedEmbeddingProfile()?.dimensions || 1024)) {
+    paragraphs.push(`rag_embedding 매핑은 ${info.mapping_dimensions}차원이며 현재 프로필 ${selectedEmbeddingProfile()?.profile_id || "e5-multilingual-large"}은 ${selectedEmbeddingProfile()?.dimensions || 1024}차원을 요구합니다. 벡터가 필요한 검색은 사용할 수 없지만 BM25 검색은 계속 사용할 수 있습니다.`);
+    blocked = true;
+  } else if (info.mapping_compatible === false) {
+    paragraphs.push(state.locale === "en"
+      ? (info.mapping_error || "The stored vector recipe does not match the selected profile.")
+      : "저장 벡터의 recipe fingerprint가 선택한 프로필과 다릅니다. 같은 차원이어도 다른 모델은 함께 검색할 수 없습니다.");
     blocked = true;
   } else {
-    paragraphs.push("rag_embedding 매핑은 현재 벡터 요청에 필요한 1024차원입니다.");
+    paragraphs.push(`rag_embedding 매핑은 현재 프로필 요청에 필요한 ${selectedEmbeddingProfile()?.dimensions || 1024}차원입니다.`);
   }
 
   if (!info.runtime_installed) {
@@ -727,7 +864,7 @@ function searchModeReadiness(mode = $("#search-mode").value) {
   } else if (blocked) {
     paragraphs.push(`질의용 로컬 ${info.model_name || "FastEmbed"} 모델은 아직 캐시되지 않았습니다.`);
   } else {
-    paragraphs.push(`질의용 로컬 ${info.model_name || "FastEmbed"} 모델은 아직 캐시되지 않았습니다. 첫 질의 임베딩에서 약 2.24 GB를 다운로드할 수 있습니다.`);
+    paragraphs.push(`질의용 로컬 ${info.model_name || selectedEmbeddingProfile()?.model_name || "FastEmbed"} 모델은 아직 캐시되지 않았습니다. 다운로드는 명시적으로 동의한 경우에만 시작합니다.`);
   }
   if (mode === "vector") {
     paragraphs.push("이 방식은 저장 벡터가 있는 문서의 벡터 후보를 검색합니다.");
@@ -736,7 +873,7 @@ function searchModeReadiness(mode = $("#search-mode").value) {
   } else {
     paragraphs.push("벡터 요청이 성공하면 코드 + Jira RAG는 Jira 벡터 후보와 어휘 후보를 결합하고, 코드 후보는 별도로 보여줍니다.");
   }
-  paragraphs.push("저장된 벡터의 모델 출처는 확인할 수 없으므로, 이 상태는 모델 호환성이나 검색 품질의 검증 결과가 아닙니다.");
+  paragraphs.push("선택한 profile_id의 호환성과 준비 상태를 확인합니다. 이 표시는 검색 품질의 검증 결과가 아닙니다.");
   return { active: true, blocked, requiresModelDownload: !blocked && !info.model_cached, paragraphs, plain: paragraphs.join(" ") };
 }
 
@@ -753,13 +890,14 @@ function renderSearchReadiness() {
 async function vectorizeIndex() {
   if (!state.connected || !state.embedding?.mapping_available) return;
   const button = $("#vectorize-button");
-  if (!window.confirm(`선택한 인덱스의 rag_chunk_text를 ${state.embedding.model_name}으로 임베딩해 rag_embedding 필드에 추가할까요?\n첫 실행은 모델을 약 2.24GB 다운로드합니다. 기존 문서 필드는 변경하지 않습니다.`)) return;
+  const profile = selectedEmbeddingProfile();
+  if (!window.confirm(`선택한 인덱스의 rag_chunk_text를 ${profile?.model_name || state.embedding.model_name} (${profile?.dimensions || state.embedding.mapping_dimensions}차원) 프로필로 임베딩할까요? 모델 파일은 아직 캐시되지 않았다면 이 동의 후 로컬 캐시에 내려받습니다. 기존 문서 필드는 변경하지 않습니다.`)) return;
   setBusy(button, true, "모델 다운로드 및 임베딩 중");
   $("#embedding-status").textContent = "로컬 모델을 준비하고 누락된 문서 벡터를 생성 중입니다. 첫 다운로드는 시간이 걸릴 수 있습니다…";
   try {
-    const result = await api("/api/vectorize", requestPayload());
+    const result = await api("/api/vectorize", requestPayload({ profile_id: state.sharedProfileId }));
     showToast(result.message);
-    const updated = await api("/api/connect", requestPayload());
+    const updated = await api("/api/connect", requestPayload({ profile_id: state.sharedProfileId }));
     state.embedding = updated.embedding;
     state.embeddingIndex = updated.selected_index || $("#index-name").value.trim();
     renderEmbeddingStatus(state.embedding);
@@ -769,7 +907,8 @@ async function vectorizeIndex() {
     showToast(error.message, true);
   } finally {
     button.textContent = state.embedding?.model_cached ? "누락 임베딩 생성" : "임베딩 모델 다운로드 및 생성";
-    button.disabled = !state.connected || !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== 1024 || !state.embedding.runtime_installed || state.embedding.vector_count >= state.embedding.document_count;
+    const dimensions = Number(selectedEmbeddingProfile()?.dimensions || 1024);
+    button.disabled = !state.connected || !state.embedding?.mapping_available || Number(state.embedding.mapping_dimensions) !== dimensions || state.embedding.mapping_compatible === false || !state.embedding.runtime_installed || state.embedding.vector_count >= state.embedding.document_count;
   }
 }
 
@@ -978,11 +1117,25 @@ async function loadKnowledgeEsStatus() {
     const response = await fetch("/api/knowledge/es-status", { cache: "no-store" });
     const value = await response.json();
     if (!response.ok) throw new Error(value.error || "상태를 확인하지 못했습니다.");
+    if (!state.privateProfileTouched && typeof value.vector_profile_id === "string") {
+      state.privateProfileId = value.vector_profile_id;
+      if ($("#knowledge-vector-profile-select")) $("#knowledge-vector-profile-select").value = value.vector_profile_id;
+    }
+    if (typeof value.vector_profile_id === "string") state.privateSavedProfileId = value.vector_profile_id;
     const names = { in_sync: "BM25 동기화 완료", stale: "변경 사항 있음 · 동기화 필요", syncing: "동기화 중", error: "동기화 실패 · 재시도 필요", not_synced: "아직 비공개 문서가 없습니다" };
     const vectorNames = { in_sync: `벡터 준비 완료 (${value.vector_chunks} passages)`, not_indexed: "벡터 미색인 · BM25만 검색 가능", stale: "벡터 동기화 필요", mapping_unavailable: "벡터 매핑을 확인할 수 없음", unavailable: "벡터 런타임을 확인할 수 없음" };
     const tokenizer = value.tokenizer || {};
-    const vectorSetup = !tokenizer.tokenizers_installed ? "token-preview extra 설치 필요" : !tokenizer.cached ? "고정 tokenizer 캐시 준비 필요" : "고정 tokenizer 사용 가능";
-    node.textContent = `${names[value.state] || value.state} · ${vectorNames[value.vector_state] || value.vector_state} · ${vectorSetup} · SQLite 문서 ${value.local_documents}개 / 청크 ${value.local_chunks}개 · ES 청크 ${value.indexed_chunks}개${value.last_synced_at ? ` · 마지막 동기화 ${formatKnowledgeDate(value.last_synced_at)}` : ""}${value.error ? ` · ${value.error}` : ""}`;
+    state.privateTokenizerStatus = tokenizer;
+    const profileRuntime = value.vector_profile_status || {};
+    const privateProfileId = value.vector_profile_id || state.privateProfileId;
+    const privateProfile = selectedEmbeddingProfile(privateProfileId);
+    const vectorSetup = !tokenizer.tokenizers_installed
+      ? (state.locale === "en" ? "optional tokenizers runtime missing" : "선택 tokenizers 런타임 없음")
+      : privateProfileId === "e5-multilingual-large"
+        ? (!tokenizer.cached ? "고정 tokenizer 캐시 준비 필요" : "고정 tokenizer 사용 가능")
+        : (profileRuntime.status === "dependency_missing" ? "FastEmbed 런타임 설치 필요" : profileRuntime.status === "loading_failure" ? "모델/tokenizer 불러오기 실패" : profileRuntime.model_cached ? "선택 모델과 tokenizer 캐시 사용 가능" : "선택 모델과 tokenizer 캐시 준비 필요");
+    const profileCopy = value.vector_profile_id ? ` · 벡터 프로필 ${privateProfile?.model_name || value.vector_profile_id} (${value.vector_profile_recipe?.dimensions || privateProfile?.dimensions || "?"}차원)` : "";
+    node.textContent = `${names[value.state] || value.state} · ${vectorNames[value.vector_state] || value.vector_state}${profileCopy} · ${vectorSetup} · SQLite 문서 ${value.local_documents}개 / 청크 ${value.local_chunks}개 · ES 청크 ${value.indexed_chunks}개${value.last_synced_at ? ` · 마지막 동기화 ${formatKnowledgeDate(value.last_synced_at)}` : ""}${value.error ? ` · ${value.error}` : ""}`;
   } catch (error) { node.textContent = error.message || "동기화 상태를 확인하지 못했습니다."; }
 }
 
@@ -1006,17 +1159,39 @@ async function syncKnowledgeEs() {
 async function syncKnowledgeEsVectors() {
   const button = $("#knowledge-es-vector-sync");
   if (!button) return;
-  const tokenizer = await fetch("/api/token-preview/status", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
-  if (!tokenizer.tokenizers_installed || !tokenizer.huggingface_hub_installed) {
-    $("#knowledge-es-status").textContent = "벡터 동기화에는 선택 패키지가 필요합니다. `python -m pip install -e '.[private-vector]'` 설치 후 다시 시도하세요. BM25는 계속 사용할 수 있습니다.";
+  state.privateProfileId = $("#knowledge-vector-profile-select")?.value || state.privateProfileId;
+  const profile = selectedEmbeddingProfile(state.privateProfileId);
+  if (!profile?.runtime_installed) {
+    $("#knowledge-es-status").textContent = state.locale === "en"
+      ? "Vector sync needs the optional FastEmbed runtime. Install the private-vector extra, then retry. BM25 remains available."
+      : "벡터 동기화에는 선택 FastEmbed 런타임이 필요합니다. private-vector extra 설치 후 다시 시도하세요. BM25는 계속 사용할 수 있습니다.";
     return;
   }
-  if (!window.confirm("내 비공개 문서의 선택적 벡터 색인을 만들까요? 고정 E5 tokenizer 파일(최대 약 18 MB)과 E5 모델(첫 다운로드 약 2.24 GB)이 아직 캐시되지 않았다면 내려받습니다. 원문은 로컬 ES 별칭에 저장되며 AI 문맥에는 추가되지 않습니다.")) return;
+  if (state.privateProfileId === "e5-multilingual-large") {
+    const tokenizer = await fetch("/api/token-preview/status", { cache: "no-store" }).then((r) => r.json()).catch(() => ({}));
+    if (!tokenizer.tokenizers_installed || !tokenizer.huggingface_hub_installed) {
+      $("#knowledge-es-status").textContent = state.locale === "en"
+        ? "E5 private vector sync needs the optional tokenizer packages. Install the private-vector extra, then retry. BM25 remains available."
+        : "E5 개인 벡터 동기화에는 선택 tokenizer 패키지가 필요합니다. private-vector extra 설치 후 다시 시도하세요. BM25는 계속 사용할 수 있습니다.";
+      return;
+    }
+  } else if (state.privateTokenizerStatus?.tokenizers_installed === false) {
+    $("#knowledge-es-status").textContent = state.locale === "en"
+      ? "MiniLM private vector sync needs the optional tokenizers runtime. Install the private-vector extra, then reload status and retry. The current generation stays active; BM25 remains available."
+      : "MiniLM 개인 벡터 동기화에는 선택 tokenizers 런타임이 필요합니다. private-vector extra를 설치한 뒤 상태를 새로고침하고 다시 시도하세요. 현재 generation은 유지되며 BM25는 계속 사용할 수 있습니다.";
+    return;
+  }
+  const consentMessage = state.locale === "en"
+    ? `Create a new account-private vector generation from your documents using ${profile?.model_name || state.privateProfileId} (${profile?.dimensions || "?"}d)? If needed, tokenizer/model files will be downloaded into the local cache after this consent. The current generation stays active until the new generation is published.`
+    : `내 문서로 ${profile?.model_name || state.privateProfileId} (${profile?.dimensions || "?"}차원) 프로필의 새 계정 비공개 벡터 generation을 만들까요? 필요한 tokenizer/model 파일은 이 동의 후 로컬 캐시에 내려받습니다. 새 generation 게시 전까지 현재 generation을 유지합니다.`;
+  if (!window.confirm(consentMessage)) return;
   button.disabled = true;
   $("#knowledge-es-status").textContent = "고정 tokenizer를 확인하고, 동의된 경우 모델을 로컬 캐시에 준비한 뒤 새 벡터 generation을 만듭니다…";
   try {
-    const status = await api("/api/knowledge/es-vector-sync", { connection: getConnection(), allow_model_download: true });
-    $("#knowledge-es-status").textContent = `벡터 동기화 완료 · ${status.vector_chunks} passages · 1024차원 cosine · 계정 비공개 별칭`;
+    const status = await api("/api/knowledge/es-vector-sync", { connection: getConnection(), allow_model_download: true, profile_id: state.privateProfileId });
+    $("#knowledge-es-status").textContent = state.locale === "en"
+      ? `Vector sync complete · ${status.vector_chunks} passages · ${status.recipe?.dimensions || profile?.dimensions || "?"}d ${status.recipe?.similarity || "cosine"} · ${status.profile_id || state.privateProfileId} · account-private alias`
+      : `벡터 동기화 완료 · ${status.vector_chunks} passages · ${status.recipe?.dimensions || profile?.dimensions || "?"}차원 ${status.recipe?.similarity || "cosine"} · ${status.profile_id || state.privateProfileId} · 계정 비공개 별칭`;
   } catch (error) {
     $("#knowledge-es-status").textContent = error.message || "벡터 동기화에 실패했습니다. 이전 별칭은 유지됩니다. 런타임, tokenizer, 모델 캐시와 Elasticsearch 매핑을 확인하세요.";
   } finally { button.disabled = false; await loadKnowledgeEsStatus(); }
@@ -1875,13 +2050,13 @@ async function runSearch() {
   if (isVectorDependentMode(mode)) {
     const readiness = searchModeReadiness(mode);
     if (readiness.blocked) return showToast(readiness.plain, true);
-    if (readiness.requiresModelDownload && !window.confirm(`첫 질의 임베딩을 위해 ${state.embedding.model_name || "FastEmbed 모델"}을 약 2.24 GB 다운로드할 수 있습니다. 계속 검색할까요?`)) return;
+    if (readiness.requiresModelDownload && !window.confirm(`첫 질의 임베딩을 위해 ${selectedEmbeddingProfile()?.model_name || state.embedding.model_name || "FastEmbed 모델"} 파일을 로컬 캐시에 내려받을 수 있습니다. 계속 검색할까요?`)) return;
   }
   setBusy(button, true, state.locale === "en" ? "Searching" : "검색 중");
   $("#search-results").innerHTML = `<div class="empty-state"><span class="loading-inline"><i class="spinner"></i> ${state.locale === "en" ? (mode === "code_rag" ? "Searching Jira and the gRPC code index" : "Searching Elasticsearch") : (mode === "code_rag" ? "Jira와 gRPC 코드 색인 검색 중" : "Elasticsearch 검색 중")}</span></div>`;
   $("#search-summary").classList.add("hidden");
   try {
-    const payload = requestPayload({ query, size: Number($("#search-size").value), boosts: readBoosts(), filters: readFilters(), mode, rank_constant: Number($("#rank-constant").value) });
+    const payload = requestPayload({ query, size: Number($("#search-size").value), boosts: readBoosts(), filters: readFilters(), mode, rank_constant: Number($("#rank-constant").value), ...(mode === "vector" || mode === "hybrid" || mode === "code_rag" ? { profile_id: state.sharedProfileId } : {}) });
     if (mode === "code_rag") {
       const result = await api("/api/code-rag", payload);
       state.lastSearch = { ...payload, result: { ...result.issues, mode: "hybrid" } };
@@ -1948,8 +2123,9 @@ function renderSearch(result, query) {
       ? '<div class="empty-state compact-empty"><p>아직 비공개 문서가 없습니다. 내 지식 화면에서 문서를 추가하세요.</p></div>'
       : `<div class="notice notice-muted">${privateLane.state === "unsupported_mode" ? `내 비공개 지식은 ${escapeHtml(privateLane.supported_mode || "BM25")} 검색만 지원합니다. 현재 ${escapeHtml(privateLane.mode || result.mode)} 결과에는 포함되지 않았습니다.` : "비공개 문서가 아직 동기화되지 않았거나 동기화가 실패했습니다. 결과를 숨겼습니다. ‘내 지식’ 화면에서 동기화/재시도를 선택하세요."}</div>`;
   const privateMode = privateLane.mode || "bm25";
-  const privateMethod = { bm25: "BM25", vector: "E5 vector", hybrid: "RRF hybrid" }[privateMode] || "비공개 검색";
-  const privateNote = english ? (privateLane.state === "in_sync" ? `${privateMethod} results are a separate account-private lane and are not merged with shared results. Scores are not probabilities or quality proof.` : "Private search is unavailable. Check model, mapping, and sync status under Private knowledge.") : privateLane.state === "in_sync" ? `${privateMethod} 결과는 별도 계정 비공개 lane입니다. 공유 결과와 합치지 않습니다. ${privateMode === "hybrid" ? "RRF는 순위를 결합하며 원점수를 더하지 않습니다." : "점수는 확률이나 품질 검증 결과가 아닙니다."}` : privateLane.message || "비공개 검색 상태를 확인할 수 없습니다. 내 지식 화면에서 모델, 매핑, 동기화 상태를 확인하세요.";
+  const savedPrivateProfile = state.embeddingProfiles.find((profile) => profile.profile_id === state.privateSavedProfileId);
+  const privateMethod = { bm25: "BM25", vector: english ? `vector · ${savedPrivateProfile?.model_name || state.privateSavedProfileId || "saved profile"}` : `벡터 · ${savedPrivateProfile?.model_name || state.privateSavedProfileId || "저장 프로필"}`, hybrid: "RRF hybrid" }[privateMode] || (english ? "private search" : "비공개 검색");
+  const privateNote = english ? (privateLane.state === "in_sync" ? `${privateMethod} results use the saved account profile and remain a separate lane. They are not merged with shared results. Scores are not probabilities or quality proof.` : "Private search is unavailable. Check model, mapping, and sync status under Private knowledge.") : privateLane.state === "in_sync" ? `${privateMethod} 결과는 저장된 개인 프로필을 사용하며 별도 계정 비공개 lane입니다. 공유 결과와 합치지 않습니다. ${privateMode === "hybrid" ? "RRF는 순위를 결합하며 원점수를 더하지 않습니다." : "점수는 확률이나 품질 검증 결과가 아닙니다."}` : privateLane.message || "비공개 검색 상태를 확인할 수 없습니다. 내 지식 화면에서 모델, 매핑, 동기화 상태를 확인하세요.";
   const sharedLabel = sharedUnavailable ? (english ? "Unavailable" : "검색을 사용할 수 없음") : `${Number(result.total).toLocaleString()}${english ? " matches" : "개"} · ${method}`;
   $("#search-results").innerHTML = `<section class="evidence-section"><div class="evidence-section-heading"><h3>${english ? "Selected shared index" : "선택한 공유 인덱스"}</h3><span>${sharedLabel}</span></div>${sharedHtml}</section><section class="evidence-section"><div class="evidence-section-heading"><h3>${english ? `Private knowledge · ${privateMethod}` : `내 비공개 지식 · ${privateMethod}`}</h3><span>${privateHits.length}${english ? " · separate ranking" : "개 · 별도 순위"}</span></div>${privateHtml}<p class="helper-text">${escapeHtml(privateNote)}</p></section>`;
 }
@@ -2377,7 +2553,7 @@ function updateModeComparisonGroupAction() {
     message = "묶음 안의 질의가 서로 다른 사용 방식으로 나뉘어 있습니다. 모두 ‘설정 조정에 사용’ 또는 모두 ‘별도 확인용’으로 맞춰 주세요.";
   } else {
     status = "ready";
-    message = `${members.length}개 질의가 준비됐습니다. 각 저장 질의에 BM25와 E5 벡터 검색을 실행합니다(최대 ${members.length * 2}번의 검색).`;
+    message = `${members.length}개 질의가 준비됐습니다. 각 저장 질의에 BM25와 선택한 벡터 프로필 검색을 실행합니다(최대 ${members.length * 2}번의 검색).`;
   }
   const eligible = status === "ready";
   button.disabled = !eligible;
@@ -2875,7 +3051,7 @@ async function loadVectorCandidates() {
   $("#concept-vector-results").replaceChildren();
   $("#concept-vector-status").innerHTML = '<span class="loading-inline"><i class="spinner"></i> 벡터 후보를 확인하고 있습니다.</span>';
   try {
-    const result = await api("/api/concepts/vector-candidates", { connection: getConnection(), concept_id: state.conceptId, query_id: queryId });
+    const result = await api("/api/concepts/vector-candidates", { connection: getConnection(), concept_id: state.conceptId, query_id: queryId, profile_id: state.sharedProfileId });
     if (requestGeneration !== state.vectorCandidateGeneration) return;
     if (state.conceptId !== requestedConceptId || state.savedConceptSnapshot !== requestedSnapshot || $("#concept-query-select").value !== queryId || !vectorCandidateContextValid(queryId)) {
       clearVectorCandidatePool("선택한 개념이나 질의가 바뀌어 이전 응답을 표시하지 않았습니다.");
@@ -2978,7 +3154,7 @@ function vectorCandidateContextValid(queryId = $("#concept-query-select").value)
 }
 
 function renderModeComparison(result) {
-  const names = { concept_bm25: "개념 적용 BM25", e5_vector: "E5 벡터" };
+  const names = { concept_bm25: "개념 적용 BM25", e5_vector: `벡터 · ${selectedEmbeddingProfile()?.model_name || "선택 프로필"}` };
   const metricNames = [["ndcg_at_k", "nDCG"], ["judged_coverage_at_k", "평가 문서 포함률"], ["recall_of_judged_relevant_at_k", "평가한 관련 문서 회수율"]];
   const cards = Object.entries(result.metrics || {}).map(([key, metric]) => {
     const status = metric.status === "no_judgments" ? "저장된 유효 평가가 없습니다." : metric.status === "no_positive_judgments" ? "관련 있다고 평가한 문서가 없어 순위 점수를 계산할 수 없습니다." : "평가가 있는 문서만으로 계산했습니다.";
@@ -3001,7 +3177,7 @@ async function compareSavedQueryModes() {
   $("#concept-mode-comparison-results").replaceChildren();
   $("#concept-mode-comparison-status").textContent = "같은 저장 질의와 평가로 두 검색을 실행하고 있습니다.";
   try {
-    const result = await api("/api/concepts/mode-comparison", { connection: getConnection(), concept_id: requestedConceptId, query_id: queryId });
+    const result = await api("/api/concepts/mode-comparison", { connection: getConnection(), concept_id: requestedConceptId, query_id: queryId, profile_id: state.sharedProfileId });
     if (generation !== state.modeComparisonGeneration) return;
     if (state.conceptId !== requestedConceptId || state.savedConceptSnapshot !== requestedSnapshot || $("#concept-query-select").value !== queryId || !vectorCandidateContextValid(queryId)) {
       $("#concept-mode-comparison-status").textContent = "요청 중 개념 또는 질의가 바뀌어 이전 비교 결과를 표시하지 않았습니다.";
@@ -3021,7 +3197,7 @@ async function compareSavedQueryModes() {
 }
 
 function renderModeComparisonGroup(result) {
-  const names = { concept_bm25: "개념 적용 BM25", e5_vector: "E5 벡터" };
+  const names = { concept_bm25: "개념 적용 BM25", e5_vector: `벡터 · ${selectedEmbeddingProfile()?.model_name || "선택 프로필"}` };
   const metrics = [["ndcg_at_k", "nDCG"], ["judged_coverage_at_k", "평가 문서 포함률"], ["recall_of_judged_relevant_at_k", "평가한 관련 문서 회수율"]];
   const number = (value) => value == null ? "—" : formatNumber(value);
   const queryRows = (result.queries || []).map((query) => {
@@ -3049,9 +3225,9 @@ async function compareSavedQueryGroupModes() {
   state.modeComparisonGroupRunning = true;
   updateModeComparisonGroupAction();
   $("#concept-mode-comparison-group-results").replaceChildren();
-  $("#concept-mode-comparison-group-status").textContent = "저장된 묶음의 질의를 하나씩 비교하고 있습니다. 질의마다 BM25와 E5 검색을 실행하므로 잠시 걸릴 수 있습니다.";
+  $("#concept-mode-comparison-group-status").textContent = `저장된 묶음의 질의를 하나씩 비교하고 있습니다. 질의마다 BM25와 ${selectedEmbeddingProfile()?.model_name || "선택한 벡터 프로필"} 검색을 실행하므로 잠시 걸릴 수 있습니다.`;
   try {
-    const result = await api("/api/concepts/mode-comparison-group", { connection: getConnection(), concept_id: requestedConceptId, query_id: queryId });
+    const result = await api("/api/concepts/mode-comparison-group", { connection: getConnection(), concept_id: requestedConceptId, query_id: queryId, profile_id: state.sharedProfileId });
     if (generation !== state.modeComparisonGroupGeneration) return;
     if (state.conceptId !== requestedConceptId || state.savedConceptSnapshot !== requestedSnapshot || $("#concept-query-select").value !== queryId || requestedSnapshot !== JSON.stringify(collectConcept())) {
       $("#concept-mode-comparison-group-status").textContent = "요청 중 개념 또는 질의가 바뀌어 이전 묶음 비교 결과를 표시하지 않았습니다.";
@@ -4589,12 +4765,14 @@ function init() {
   $("#server-version").textContent = "ready";
   fetch("/api/health", { cache: "no-store" }).then((response) => response.json()).then((result) => { $("#server-version").textContent = `v${result.version}`; }).catch(() => {});
   refreshCodebaseStatus();
+  loadEmbeddingProfiles();
 
   $$(".tab").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
   activateTab("concept-panel");
   bindKnowledgeControls();
   $("#ui-language").addEventListener("change", () => {
     applyLocale($("#ui-language").value);
+    loadEmbeddingProfiles();
     try { localStorage.setItem("es-rag-locale", state.locale); } catch {}
   });
   $("#save-connection-profile").addEventListener("click", saveConnectionProfile);
@@ -4633,6 +4811,20 @@ function init() {
     setConnectionStatus("idle", "새 주소에서 다시 연결하세요");
   });
   $("#search-button").addEventListener("click", runSearch);
+  $("#embedding-profile-select").addEventListener("change", () => {
+    state.sharedProfileId = $("#embedding-profile-select").value;
+    $("#embedding-profile-select").dataset.touched = "true";
+    renderEmbeddingProfileDetails();
+    clearVectorCandidatePool("공유 임베딩 프로필이 바뀌어 이전 후보를 지웠습니다. 새 프로필과 색인 recipe를 확인하세요.");
+    if (state.connected) connect();
+    else renderSearchReadiness();
+  });
+  $("#knowledge-vector-profile-select").addEventListener("change", () => {
+    state.privateProfileId = $("#knowledge-vector-profile-select").value;
+    state.privateProfileTouched = true;
+    renderEmbeddingProfileDetails();
+    $("#knowledge-es-status").textContent = "선택한 프로필은 다음 명시적 벡터 동기화에서 사용됩니다. 기존 generation은 그대로 유지됩니다.";
+  });
   $("#search-mode").addEventListener("change", () => {
     $("#rank-constant-wrap").classList.toggle("hidden", !["hybrid", "code_rag"].includes($("#search-mode").value));
     renderSearchReadiness();

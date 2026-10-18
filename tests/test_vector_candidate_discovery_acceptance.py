@@ -24,6 +24,7 @@ from urllib.request import Request, urlopen
 from unittest.mock import patch
 
 from es_rag_tuner import embeddings, server as workbench_server
+from es_rag_tuner.retrieval import profile_fingerprint
 try:
     from tests.cycle37_auth_test_support import api_request, install_auth_fixture
 except ModuleNotFoundError:
@@ -58,6 +59,7 @@ class SyntheticElasticsearch(BaseHTTPRequestHandler):
     requests: list[tuple[str, str, object]] = []
     count = 2
     mapping_dimensions = embeddings.MODEL_DIMENSIONS
+    mapping_meta: dict[str, object] = {}
     response: dict[str, object] = {}
 
     def log_message(self, *_args):
@@ -74,14 +76,24 @@ class SyntheticElasticsearch(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
         type(self).requests.append(("GET", path, None))
-        if path.endswith("/_mapping"):
-            self._send(200, {"synthetic-vector-index": {"mappings": {"properties": {
+        if path == "/":
+            self._send(200, {"cluster_name": "synthetic", "version": {"number": "9.5.5"}, "tagline": "search"})
+        elif path == "/_cat/indices":
+            self._send(200, [{"index": "synthetic-vector-index"}])
+        elif path.endswith("/_count"):
+            self._send(200, {"count": type(self).count})
+        elif path.endswith("/_mapping"):
+            self._send(200, {"synthetic-vector-index": {"mappings": {**({"_meta": type(self).mapping_meta} if type(self).mapping_meta else {}), "properties": {
                 "title": {"type": "text"}, "body": {"type": "text"},
                 "tenant": {"type": "keyword"}, "priority": {"type": "integer"},
                 "rag_embedding": {"type": "dense_vector", "dims": type(self).mapping_dimensions},
             }}}})
         else:
             self._send(404, {"error": "synthetic fixture route not found"})
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
     def do_POST(self):
         path = urlsplit(self.path).path
@@ -129,6 +141,7 @@ class VectorCandidateDiscoveryAcceptance(unittest.TestCase):
         SyntheticElasticsearch.requests = []
         SyntheticElasticsearch.count = 2
         SyntheticElasticsearch.mapping_dimensions = embeddings.MODEL_DIMENSIONS
+        SyntheticElasticsearch.mapping_meta = {}
         SyntheticElasticsearch.response = {
             "timed_out": False, "_shards": {"failed": 0},
             "hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
@@ -158,9 +171,10 @@ class VectorCandidateDiscoveryAcceptance(unittest.TestCase):
     def tearDown(self):
         self.embed_patch.stop()
 
-    def fake_embed(self, texts, role, *, local_files_only=False):
+    def fake_embed(self, texts, role, *, local_files_only=False, profile_id=None):
         self.embedded_texts.append((list(texts), role, local_files_only))
-        return [[0.0] * embeddings.MODEL_DIMENSIONS for _ in texts]
+        dimensions = embeddings.profile_spec(profile_id)["dimensions"]
+        return [[0.0] * dimensions for _ in texts]
 
     def discover(self, **extra):
         return http_json(self.base + "/api/concepts/vector-candidates", "POST", {
@@ -289,7 +303,7 @@ class VectorCandidateDiscoveryAcceptance(unittest.TestCase):
         self.assertGreaterEqual(status, 400, payload)
         self.assertNotIn("candidates", payload)
         self.assertEqual(self.embedded_texts, [])
-        model_loader.assert_called_once_with(local_files_only=True)
+        model_loader.assert_called_once_with(embeddings.DEFAULT_PROFILE_ID, local_files_only=True)
 
     def test_embed_texts_propagates_local_only_to_fastembed_loader(self):
         self.embed_patch.stop()
@@ -302,8 +316,105 @@ class VectorCandidateDiscoveryAcceptance(unittest.TestCase):
 
         with patch.object(embeddings, "_model", return_value=Model()) as model_loader:
             result = embeddings.embed_texts(["saved synthetic query"], "query", local_files_only=True)
-        model_loader.assert_called_once_with(local_files_only=True)
+        model_loader.assert_called_once_with(embeddings.DEFAULT_PROFILE_ID, local_files_only=True)
         self.assertEqual(len(result[0]), embeddings.MODEL_DIMENSIONS)
+
+    def test_explicit_profile_controls_mapping_dimension_and_query_vector(self):
+        profile_id = "paraphrase-multilingual-minilm-l12"
+        SyntheticElasticsearch.mapping_dimensions = embeddings.profile_spec(profile_id)["dimensions"]
+        recipe = embeddings.profile_recipe(profile_id)
+        SyntheticElasticsearch.mapping_meta = {
+            "embedding_profile_recipe": recipe,
+            "embedding_profile_sha256": profile_fingerprint(recipe),
+        }
+        status, payload = self.discover(profile_id=profile_id)
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["profile_id"], profile_id)
+        self.assertEqual(payload["dimensions"], 384)
+        body = self.search_request()
+        self.assertEqual(len(body["knn"]["query_vector"]), 384)
+        self.assertEqual(self.embedded_texts[0][1:], ("query", True))
+
+    def test_non_default_profile_rejects_untagged_vector_provenance_before_knn(self):
+        profile_id = "paraphrase-multilingual-minilm-l12"
+        SyntheticElasticsearch.mapping_dimensions = 384
+        status, payload = self.discover(profile_id=profile_id)
+        self.assertEqual(status, 409, payload)
+        self.assertNotIn("candidates", payload)
+        self.assertFalse(any(method == "POST" and urlsplit(path).path.endswith("/_search")
+                             for method, path, _ in SyntheticElasticsearch.requests))
+
+    def test_authenticated_profile_endpoint_exposes_only_safe_profile_metadata(self):
+        status, payload = self.test_api.request("/api/embedding/profiles")
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["default_profile_id"], embeddings.DEFAULT_PROFILE_ID)
+        profiles = {item["profile_id"]: item for item in payload["profiles"]}
+        mini = profiles["paraphrase-multilingual-minilm-l12"]
+        self.assertEqual(mini["dimensions"], 384)
+        self.assertEqual(mini["max_tokens"], 128)
+        self.assertEqual(mini["similarity"], "cosine")
+        self.assertEqual(mini["recipe_fingerprint"], mini["recipe"]["recipe_fingerprint"])
+        self.assertIn("fastembed_version", mini)
+        self.assertIn("normalized", mini)
+        self.assertIn("source_repo", mini)
+        self.assertIn("query_prefix", mini)
+        self.assertIn("passage_prefix", mini)
+        self.assertIn("setup_state", mini)
+        self.assertIn("safe_message", mini)
+        self.assertFalse(any("path" in key.lower() for item in profiles.values() for key in item))
+
+    def test_connect_reports_selected_profile_and_mapping_compatibility(self):
+        profile_id = "paraphrase-multilingual-minilm-l12"
+        recipe = embeddings.profile_recipe(profile_id)
+        SyntheticElasticsearch.mapping_dimensions = 384
+        SyntheticElasticsearch.mapping_meta = {
+            "embedding_profile_recipe": recipe,
+            "embedding_profile_sha256": profile_fingerprint(recipe),
+        }
+        status, payload = self.test_api.post("/api/connect", {
+            "connection": self.connection, "index": "synthetic-vector-index", "profile_id": profile_id,
+        })
+        self.assertEqual(status, 200, (payload, SyntheticElasticsearch.requests))
+        self.assertEqual(payload["embedding"]["profile_id"], profile_id)
+        self.assertEqual(payload["embedding"]["mapping_dimensions"], 384)
+        self.assertTrue(payload["embedding"]["mapping_compatible"])
+
+    def test_connect_allows_profile_initialization_only_when_no_vectors_exist(self):
+        profile_id = "paraphrase-multilingual-minilm-l12"
+        SyntheticElasticsearch.mapping_dimensions = 384
+        SyntheticElasticsearch.mapping_meta = {}
+        SyntheticElasticsearch.count = 0
+        request_body = {"connection": self.connection, "index": "synthetic-vector-index", "profile_id": profile_id}
+        status, empty = self.test_api.post("/api/connect", request_body)
+        self.assertEqual(status, 200, empty)
+        self.assertTrue(empty["embedding"]["mapping_available"])
+        self.assertTrue(empty["embedding"]["mapping_compatible"])
+        self.assertIsNone(empty["embedding"]["mapping_error"])
+
+        SyntheticElasticsearch.count = 1
+        status, populated = self.test_api.post("/api/connect", request_body)
+        self.assertEqual(status, 200, populated)
+        self.assertTrue(populated["embedding"]["mapping_available"])
+        self.assertFalse(populated["embedding"]["mapping_compatible"])
+        self.assertTrue(populated["embedding"]["mapping_error"])
+
+    def test_shared_vector_search_uses_requested_profile_and_returns_recipe(self):
+        profile_id = "paraphrase-multilingual-minilm-l12"
+        recipe = embeddings.profile_recipe(profile_id)
+        SyntheticElasticsearch.mapping_dimensions = 384
+        SyntheticElasticsearch.mapping_meta = {
+            "embedding_profile_recipe": recipe,
+            "embedding_profile_sha256": profile_fingerprint(recipe),
+        }
+        status, payload = self.test_api.post("/api/search", {
+            "connection": self.connection, "index": "synthetic-vector-index",
+            "query": "synthetic query", "mode": "vector", "profile_id": profile_id,
+        })
+        self.assertEqual(status, 200, payload)
+        self.assertEqual(payload["embedding_profile"]["profile_id"], profile_id)
+        self.assertEqual(payload["embedding_profile"]["dimensions"], 384)
+        self.assertEqual(payload["query"]["knn"]["profile_id"], profile_id)
+        self.assertEqual(len(self.search_request()["knn"]["query_vector"]), 384)
 
 
 if __name__ == "__main__":

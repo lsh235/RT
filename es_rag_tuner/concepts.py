@@ -1174,7 +1174,8 @@ def _saved_query(concept: dict[str, Any], query_id: str) -> dict[str, Any]:
 
 def _vector_candidates_for_saved_query(connection: Connection, concept: dict[str, Any], query_id: str,
                                        judgments: list[dict[str, Any]] | None = None,
-                                       effective_filters: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                                       effective_filters: list[dict[str, Any]] | None = None,
+                                       profile_id: str | None = None) -> dict[str, Any]:
     saved_query = _saved_query(concept, query_id)
     _validate_search_fields(connection, concept)
     index = concept["corpus"]["index"]
@@ -1182,14 +1183,20 @@ def _vector_candidates_for_saved_query(connection: Connection, concept: dict[str
         concept.get("_field_metadata", {}).get(field, {}).get("source_field", field)
         for field in [*concept["corpus"]["text_fields"], *([concept["corpus"]["title_field"]] if concept["corpus"]["title_field"] else [])]
     ))
-    _, concrete_indices = vector_mapping_targets(connection, index)
+    spec = embeddings.profile_spec(profile_id)
+    recipe = embeddings.profile_recipe(profile_id)
+    _, concrete_indices = (vector_mapping_targets(connection, index, profile_id=profile_id)
+                           if profile_id is not None else vector_mapping_targets(connection, index))
     if count_vectors(connection, index) <= 0:
         raise ElasticsearchError("선택한 인덱스에 사용할 수 있는 임베딩 문서가 없습니다. 인덱스 준비 상태를 확인하세요.")
     try:
-        query_vector = embeddings.embed_texts([saved_query["query"]], "query", local_files_only=True)[0]
+        if profile_id is None:
+            query_vector = embeddings.embed_texts([saved_query["query"]], "query", local_files_only=True)[0]
+        else:
+            query_vector = embeddings.embed_texts([saved_query["query"]], "query", local_files_only=True, profile_id=profile_id)[0]
     except Exception as exc:
         raise ElasticsearchError(f"질의 임베딩을 준비하지 못했습니다: {str(exc)[:300]}", 503, safe_for_user=False) from None
-    if not isinstance(query_vector, list) or len(query_vector) != embeddings.MODEL_DIMENSIONS:
+    if not isinstance(query_vector, list) or len(query_vector) != spec["dimensions"]:
         raise ElasticsearchError("질의 임베딩 응답의 차원이 올바르지 않습니다.", 503)
     filters = concept["filters"] if effective_filters is None else effective_filters
     knn: dict[str, Any] = {"field": "rag_embedding", "query_vector": query_vector, "k": concept["settings"]["size"], "num_candidates": min(10000, max(50, concept["settings"]["size"] * 10))}
@@ -1240,15 +1247,16 @@ def _vector_candidates_for_saved_query(connection: Connection, concept: dict[str
         total = total.get("value")
     if not isinstance(total, int) or isinstance(total, bool) or total < len(candidates):
         raise ElasticsearchError("벡터 후보 검색 total 응답이 올바르지 않습니다.", 503)
-    return {"concept_id": concept["id"], "query_id": query_id, "query": saved_query["query"], "index": index, "mode": "vector", "model": embeddings.MODEL_NAME,
-            "field": "rag_embedding", "dimensions": embeddings.MODEL_DIMENSIONS, "approximate": True, "exhaustive": False, "total": total, "candidates": candidates}
+    return {"concept_id": concept["id"], "query_id": query_id, "query": saved_query["query"], "index": index, "mode": "vector", "model": spec["model_name"],
+            "profile_id": spec["profile_id"], "recipe": recipe, "field": "rag_embedding", "dimensions": spec["dimensions"], "approximate": True, "exhaustive": False, "total": total, "candidates": candidates}
 
 
-def vector_candidates(connection: Connection, concept_id: str, query_id: str) -> dict[str, Any]:
+def vector_candidates(connection: Connection, concept_id: str, query_id: str,
+                      profile_id: str | None = None) -> dict[str, Any]:
     """Read a bounded dense-vector candidate list for one persisted query."""
     concept = _load_saved_concept_readonly(concept_id)
     _saved_query(concept, query_id)
-    return _vector_candidates_for_saved_query(connection, concept, str(query_id).strip())
+    return _vector_candidates_for_saved_query(connection, concept, str(query_id).strip(), profile_id=profile_id)
 
 
 def _complete_comparison_hits(connection: Connection, concept: dict[str, Any], query: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1292,7 +1300,8 @@ def _complete_comparison_hits(connection: Connection, concept: dict[str, Any], q
     return output
 
 
-def mode_comparison(connection: Connection, concept_id: str, query_id: str) -> dict[str, Any]:
+def mode_comparison(connection: Connection, concept_id: str, query_id: str,
+                    profile_id: str | None = None) -> dict[str, Any]:
     """Compare judged-only metrics for one saved query without recording or mutating data."""
     concept = _load_saved_concept_readonly(concept_id)
     saved_query = _saved_query(concept, query_id)
@@ -1303,8 +1312,10 @@ def mode_comparison(connection: Connection, concept_id: str, query_id: str) -> d
     judgments = [row for row in all_judgments if row.get("query_id") == query_id and not row.get("stale")]
     filters = _normalize_filters(concept, concept["filters"])
     bm25_hits = _complete_comparison_hits(connection, concept, saved_query)
-    _, concrete_indices = vector_mapping_targets(connection, concept["corpus"]["index"])
-    vector = _vector_candidates_for_saved_query(connection, concept, query_id, all_judgments, filters)
+    _, concrete_indices = (vector_mapping_targets(connection, concept["corpus"]["index"], profile_id=profile_id)
+                           if profile_id is not None else vector_mapping_targets(connection, concept["corpus"]["index"]))
+    vector = (_vector_candidates_for_saved_query(connection, concept, query_id, all_judgments, filters, profile_id)
+              if profile_id is not None else _vector_candidates_for_saved_query(connection, concept, query_id, all_judgments, filters))
     if any(hit["_index"] not in concrete_indices for hit in bm25_hits):
         raise ElasticsearchError("BM25 비교 결과의 concrete _index가 alias 매핑 대상에 없습니다.", 503)
     bm25_keys = [_metric_document_key(hit["_index"], hit["_id"]) for hit in bm25_hits]
@@ -1332,7 +1343,8 @@ def mode_comparison(connection: Connection, concept_id: str, query_id: str) -> d
             "index": concept["corpus"]["index"], "settings_size": k, "effective_filters": filters,
             "filters_fingerprint": _json_hash(filters), "judgments_applied_to_current_filters": True,
             "metrics": {"concept_bm25": metrics_for(bm25_keys), "e5_vector": metrics_for(vector_keys)},
-            "vector": {"approximate": True, "exhaustive": False, "model": vector["model"], "field": vector["field"],
+            "vector": {"approximate": True, "exhaustive": False, "model": vector["model"],
+                       "profile_id": vector["profile_id"], "recipe": vector["recipe"], "dimensions": vector["dimensions"], "field": vector["field"],
                        "candidate_limit": k, "candidate_count": len(vector_keys), "total": vector["total"]},
             "bm25": {"candidate_count": len(bm25_keys)},
             "limits": ["nDCG는 평가한 문서만으로 계산하며 미평가 문서를 무관(0점)으로 보지 않습니다.",
@@ -1341,7 +1353,8 @@ def mode_comparison(connection: Connection, concept_id: str, query_id: str) -> d
                        "벡터 결과는 근사 top-K 후보로 전체 코퍼스를 다루지 않습니다. 두 지표 모두 코퍼스 전체 품질을 보장하지 않습니다."]}
 
 
-def mode_comparison_group(connection: Connection, concept_id: str, query_id: str) -> dict[str, Any]:
+def mode_comparison_group(connection: Connection, concept_id: str, query_id: str,
+                          profile_id: str | None = None) -> dict[str, Any]:
     """Compare paired read-only retrieval for every saved query in one need group."""
     concept = _load_saved_concept_readonly(concept_id)
     anchor = _saved_query(concept, query_id)
@@ -1372,7 +1385,8 @@ def mode_comparison_group(connection: Connection, concept_id: str, query_id: str
             bm25_hits = vector = None
             retrieval_errors: list[Exception] = []
             try:
-                _, concrete_indices = vector_mapping_targets(connection, concept["corpus"]["index"])
+                _, concrete_indices = (vector_mapping_targets(connection, concept["corpus"]["index"], profile_id=profile_id)
+                                       if profile_id is not None else vector_mapping_targets(connection, concept["corpus"]["index"]))
             except Exception as exc:
                 retrieval_errors.append(exc)
             # Attempt both sides for every member; if either side fails, discard
@@ -1382,7 +1396,8 @@ def mode_comparison_group(connection: Connection, concept_id: str, query_id: str
             except Exception as exc:
                 retrieval_errors.append(exc)
             try:
-                vector = _vector_candidates_for_saved_query(connection, concept, qid, all_judgments, filters)
+                vector = (_vector_candidates_for_saved_query(connection, concept, qid, all_judgments, filters, profile_id)
+                          if profile_id is not None else _vector_candidates_for_saved_query(connection, concept, qid, all_judgments, filters))
             except Exception as exc:
                 retrieval_errors.append(exc)
             if retrieval_errors:
@@ -1416,6 +1431,7 @@ def mode_comparison_group(connection: Connection, concept_id: str, query_id: str
                             "status": "complete",
                             "metrics": {"concept_bm25": metrics_for(bm25_keys), "e5_vector": metrics_for(vector_keys)},
                             "vector": {"approximate": True, "exhaustive": False, "model": vector["model"],
+                                       "profile_id": vector["profile_id"], "recipe": vector["recipe"], "dimensions": vector["dimensions"],
                                        "field": vector["field"], "candidate_limit": k,
                                        "candidate_count": len(vector_keys), "total": vector["total"]},
                             "bm25": {"candidate_count": len(bm25_keys)}})

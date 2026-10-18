@@ -68,7 +68,7 @@ def resolve_post(handler: Any, path: str) -> Callable[[dict[str, Any]], dict[str
         "/api/knowledge/delete": knowledge.delete_document,
         "/api/knowledge/search": knowledge.search,
         "/api/knowledge/es-sync": lambda payload: knowledge.sync_es(handler._connection(payload)),
-        "/api/knowledge/es-vector-sync": lambda payload: knowledge.sync_es(handler._connection(payload), vector=True, allow_model_download=payload.get("allow_model_download") is True),
+        "/api/knowledge/es-vector-sync": lambda payload: knowledge.sync_es(handler._connection(payload), vector=True, allow_model_download=payload.get("allow_model_download") is True, profile_id=payload.get("profile_id")),
         "/api/knowledge/concept-preview": knowledge.concept_preview,
         "/api/knowledge/judge": knowledge.judge,
         "/api/ai/status": handler._ai_status,

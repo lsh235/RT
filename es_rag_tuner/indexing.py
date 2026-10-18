@@ -7,8 +7,8 @@ from typing import Any
 from urllib.parse import quote
 
 from . import embeddings
-from .es_client import Connection, ElasticsearchError, count_documents, request, validate_index
-from .retrieval import count_vectors, vector_mapping
+from .es_client import Connection, ElasticsearchError, count_documents, index_scroll_scope, request, validate_index
+from .retrieval import count_vectors, profile_fingerprint, vector_mapping
 
 
 SOURCE_FIELDS = [
@@ -47,10 +47,25 @@ def _index_batch(connection: Connection, index: str, hits: list[dict[str, Any]],
         raise ElasticsearchError(f"임베딩 bulk 업데이트 중 일부 실패: {json.dumps(failed, ensure_ascii=False)}", safe_for_user=False)
 
 
-def vectorize_index(connection: Connection, index: str) -> dict[str, Any]:
+def _record_profile_recipe(connection: Connection, index: str, recipe: dict[str, Any]) -> None:
+    """Record vector provenance in mapping metadata while preserving other keys."""
+    mapping = request(connection, "GET", f"{quote(index, safe='')}/_mapping")
+    fingerprint = profile_fingerprint(recipe)
+    for concrete_index, item in mapping.items():
+        mappings = item.get("mappings", {}) if isinstance(item, dict) else {}
+        old_meta = mappings.get("_meta", {}) if isinstance(mappings, dict) else {}
+        meta = dict(old_meta) if isinstance(old_meta, dict) else {}
+        meta.update({"embedding_profile_recipe": recipe, "embedding_profile_sha256": fingerprint})
+        request(connection, "PUT", f"{quote(concrete_index, safe='')}/_mapping", {"_meta": meta})
+
+
+def vectorize_index(connection: Connection, index: str, profile_id: str | None = None) -> dict[str, Any]:
+    spec = embeddings.profile_spec(profile_id)
+    recipe = embeddings.profile_recipe(profile_id)
     index = validate_index(index)
-    vector_mapping(connection, index)
     before = count_vectors(connection, index)
+    vector_mapping(connection, index, profile_id=profile_id,
+                   allow_untagged_empty_profile=before == 0)
     pending = _missing_count(connection, index)
     if pending == 0:
         return {
@@ -58,14 +73,24 @@ def vectorize_index(connection: Connection, index: str) -> dict[str, Any]:
             "document_count": before,
             "vectors_added": 0,
             "vector_count": before,
-            "model_name": embeddings.MODEL_NAME,
-            "dimensions": embeddings.MODEL_DIMENSIONS,
+            "model_name": spec["model_name"],
+            "profile_id": spec["profile_id"],
+            "recipe": recipe,
+            "dimensions": spec["dimensions"],
             "message": "새로 생성할 임베딩이 없습니다. 기존 임베딩은 유지했습니다.",
         }
 
     # Load the model before opening the scroll context so a first-time model
     # download cannot consume the Elasticsearch scroll keepalive.
-    embeddings._model()
+    embeddings._model(profile_id or embeddings.DEFAULT_PROFILE_ID)
+    # Loading can resolve the previously unknown immutable snapshot revision.
+    # Record and return this resolved recipe so the next search fingerprint
+    # matches the index metadata exactly.
+    recipe = embeddings.profile_recipe(profile_id)
+    # Existing tagged vectors were validated above. For an untagged legacy E5
+    # index this transition is allowed only through the explicit E5 fallback;
+    # record that resolved recipe before adding more vectors.
+    _record_profile_recipe(connection, index, recipe)
     query = {
         "size": 1000,
         "track_total_hits": True,
@@ -86,23 +111,25 @@ def vectorize_index(connection: Connection, index: str) -> dict[str, Any]:
             skipped_empty += len(hits) - len(valid)
             for start in range(0, len(valid), 32):
                 batch = valid[start:start + 32]
-                vectors = embeddings.embed_texts([item[1] for item in batch], "passage")
+                vectors = embeddings.embed_texts([item[1] for item in batch], "passage", profile_id=profile_id)
                 _index_batch(connection, index, [item[0] for item in batch], vectors)
                 added += len(batch)
             if not scroll_id:
                 break
-            response = request(
-                connection,
-                "POST",
-                "_search/scroll",
-                {"scroll": "2m", "scroll_id": scroll_id},
-                timeout=120,
-            )
+            with index_scroll_scope(index):
+                response = request(
+                    connection,
+                    "POST",
+                    "_search/scroll",
+                    {"scroll": "2m", "scroll_id": scroll_id},
+                    timeout=120,
+                )
             scroll_id = response.get("_scroll_id", scroll_id)
     finally:
         if scroll_id:
             try:
-                request(connection, "DELETE", "_search/scroll", {"scroll_id": [scroll_id]}, timeout=30)
+                with index_scroll_scope(index):
+                    request(connection, "DELETE", "_search/scroll", {"scroll_id": [scroll_id]}, timeout=30)
             except ElasticsearchError:
                 pass
 
@@ -117,7 +144,9 @@ def vectorize_index(connection: Connection, index: str) -> dict[str, Any]:
         "vectors_added": added,
         "vectors_skipped_empty": skipped_empty,
         "vector_count": after,
-        "model_name": embeddings.MODEL_NAME,
-        "dimensions": embeddings.MODEL_DIMENSIONS,
-        "message": f"{added}개 문서에 {embeddings.MODEL_NAME} 임베딩을 추가했습니다.",
+        "model_name": spec["model_name"],
+        "profile_id": spec["profile_id"],
+        "recipe": recipe,
+        "dimensions": spec["dimensions"],
+        "message": f"{added}개 문서에 {spec['model_name']} 임베딩을 추가했습니다.",
     }

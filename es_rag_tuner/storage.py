@@ -235,7 +235,37 @@ def _state_v3(db: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2, 3: _state_v3}, "control": {1: _control_v1}}
+def _state_v4(db: sqlite3.Connection) -> None:
+    """Persist the selected private vector profile without changing E5 state."""
+    import json
+
+    columns = _columns(db, "knowledge_es_state")
+    for name, definition in (
+        ("vector_profile_id", "TEXT NOT NULL DEFAULT 'e5-multilingual-large'"),
+        ("vector_profile_recipe", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if name not in columns:
+            db.execute(f"ALTER TABLE knowledge_es_state ADD COLUMN {name} {definition}")
+
+    # Recognize the pre-registry E5 recipe as the selected E5 profile. Keep its
+    # exact historical recipe as the saved profile recipe so the old alias can
+    # still be checked without rewriting its mapping or vectors.
+    rows = db.execute("SELECT id,vector_recipe FROM knowledge_es_state").fetchall()
+    for row in rows:
+        recipe_text = str(row[1] or "")
+        if not recipe_text:
+            continue
+        try:
+            recipe = json.loads(recipe_text)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if (isinstance(recipe, dict) and recipe.get("model") == "intfloat/multilingual-e5-large"
+                and recipe.get("dimensions") == 1024 and recipe.get("query_prefix") == "query: "
+                and recipe.get("passage_prefix") == "passage: "):
+            db.execute("UPDATE knowledge_es_state SET vector_profile_id='e5-multilingual-large',vector_profile_recipe=? WHERE id=?", (recipe_text, row[0]))
+
+
+_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2, 3: _state_v3, 4: _state_v4}, "control": {1: _control_v1}}
 
 
 def migrate(db: sqlite3.Connection, component: str) -> None:

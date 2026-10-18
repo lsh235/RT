@@ -18,10 +18,12 @@ def _r04_fixture(path):
     db = _connection(path)
     # Construct a true R04/v2 database even though the working tree knows v3.
     v3 = storage._MIGRATIONS["state"].pop(3)
+    v4 = storage._MIGRATIONS["state"].pop(4)
     try:
         storage.migrate(db, "state")
     finally:
         storage._MIGRATIONS["state"][3] = v3
+        storage._MIGRATIONS["state"][4] = v4
     db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,revision) VALUES('doc-a','A','fixture','private body',12,'now','now',7)")
     db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES('chunk-a','doc-a',0,0,12,'private body')")
     db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES('private body','A','fixture','doc-a','chunk-a')")
@@ -55,7 +57,10 @@ def test_state_v3_migration_preserves_r04_rows_backfills_revision_and_is_idempot
     assert policy == {"strategy": "character", "size": 1800, "overlap": 200}
     assert policy_row[1] == chunking.policy_fingerprint(policy)
     assert db.execute("SELECT COUNT(*) FROM knowledge_reindex_jobs").fetchone()[0] == 0
-    assert db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version DESC LIMIT 1").fetchone()[0] == 3
+    assert db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version DESC LIMIT 1").fetchone()[0] == 4
+    state_columns = {row[1] for row in db.execute("PRAGMA table_info(knowledge_es_state)")}
+    assert {"vector_profile_id", "vector_profile_recipe"} <= state_columns
+    assert db.execute("SELECT vector_profile_id FROM knowledge_es_state WHERE id=1").fetchone()[0] == "e5-multilingual-large"
     assert [tuple(row) for row in db.execute("SELECT id,title,content,revision FROM knowledge_documents")] == before["documents"]
     assert [tuple(row) for row in db.execute("SELECT id,document_id,ordinal,start_offset,end_offset,content FROM knowledge_chunks")] == before["chunks"]
     assert [tuple(row) for row in db.execute("SELECT content,title,source_label,document_id,chunk_id FROM knowledge_fts")] == before["fts"]
@@ -91,3 +96,26 @@ def test_injected_v3_failure_rolls_back_to_v2_source_and_can_retry(tmp_path, mon
     assert snapshot.execute("SELECT content FROM knowledge_chunks WHERE id='chunk-a'").fetchone()[0] == "private body"
     assert snapshot.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version DESC LIMIT 1").fetchone()[0] == 2
     snapshot.close()
+
+
+def test_state_v4_preserves_legacy_e5_recipe_as_selected_profile(tmp_path):
+    from es_rag_tuner import knowledge
+
+    path = tmp_path / "legacy-e5.sqlite3"
+    db = _r04_fixture(path)
+    v4 = storage._MIGRATIONS["state"].pop(4)
+    try:
+        storage.migrate(db, "state")
+    finally:
+        storage._MIGRATIONS["state"][4] = v4
+    legacy_recipe = json.dumps(knowledge.LEGACY_E5_VECTOR_RECIPE, sort_keys=True, separators=(",", ":"))
+    db.execute("UPDATE knowledge_es_state SET vector_state='in_sync',vector_recipe=? WHERE id=1", (legacy_recipe,))
+    db.commit()
+
+    storage.migrate(db, "state")
+
+    state = db.execute("SELECT vector_profile_id,vector_profile_recipe,vector_recipe FROM knowledge_es_state WHERE id=1").fetchone()
+    assert state[0] == "e5-multilingual-large"
+    assert state[1] == legacy_recipe
+    assert state[2] == legacy_recipe
+    db.close()

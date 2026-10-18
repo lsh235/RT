@@ -45,7 +45,7 @@ async function main() {
       calls.push({ path: url.pathname, body });
       const json = value => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(value) });
       if (url.pathname === "/api/auth/session") return json({ configured: true, authenticated: true, csrf_token: "mock-csrf", user: { id: "synthetic-account", username: "synthetic", display_name: "Synthetic", role: "user" } });
-      if (url.pathname === "/api/health") return json({ version: "1.10.0" });
+      if (url.pathname === "/api/health") return json({ version: "1.11.0" });
       if (url.pathname === "/api/codebase-status") return json({ indexed: false });
       if (url.pathname === "/api/ai/status") return json({ providers: [] });
       if (url.pathname === "/api/concepts/list") return json({ concepts: [] });

@@ -48,8 +48,8 @@ def test_legacy_state_migration_is_transactional_idempotent_and_preserves_rows(t
     assert tuple(judgment) == (2, "keep", "")
     state = db.execute("SELECT state,generation,indexed_chunks,local_fingerprint,synced_fingerprint FROM knowledge_es_state WHERE id=1").fetchone()
     assert tuple(state) == ("synced", 7, 4, "local-fp", "remote-fp")
-    assert [tuple(row) for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version")] == [(1,), (2,), (3,)]
-    assert {row[1] for row in db.execute("PRAGMA table_info(knowledge_es_state)")} >= {"vector_state", "vector_recipe", "vector_chunks"}
+    assert [tuple(row) for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version")] == [(1,), (2,), (3,), (4,)]
+    assert {row[1] for row in db.execute("PRAGMA table_info(knowledge_es_state)")} >= {"vector_state", "vector_recipe", "vector_chunks", "vector_profile_id", "vector_profile_recipe"}
     db.close()
 
 

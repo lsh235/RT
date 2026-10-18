@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 from urllib.parse import quote
 
@@ -21,11 +23,18 @@ FILTER_FIELDS = {
 }
 
 
+def profile_fingerprint(recipe: dict[str, Any]) -> str:
+    canonical = json.dumps(recipe, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def vector_mapping_targets(
     connection: Connection,
     index: str,
     *,
     require_dimensions: bool = True,
+    profile_id: str | None = None,
+    allow_untagged_empty_profile: bool = False,
 ) -> tuple[dict[str, Any], set[str]]:
     """Validate every concrete mapping behind an index name or alias.
 
@@ -34,6 +43,7 @@ def vector_mapping_targets(
     float vectors. Index options are compared as declared: omitted server
     defaults match other omitted defaults, while explicit options must agree.
     """
+    spec = embeddings.profile_spec(profile_id)
     index = validate_index(index)
     response = request(connection, "GET", f"{quote(index, safe='')}/_mapping")
     if not isinstance(response, dict) or not response:
@@ -55,11 +65,31 @@ def vector_mapping_targets(
         dimensions = mapping.get("dims")
         if not isinstance(dimensions, int) or isinstance(dimensions, bool) or dimensions <= 0:
             raise ElasticsearchError(f"{concrete_index}의 rag_embedding dims 매핑이 올바르지 않습니다.")
-        if require_dimensions and dimensions != embeddings.MODEL_DIMENSIONS:
+        if require_dimensions and dimensions != spec["dimensions"]:
             raise ElasticsearchError(
                 f"{concrete_index}의 rag_embedding은 {dimensions}차원입니다. 현재 로컬 모델 "
-                f"{embeddings.MODEL_NAME}은 {embeddings.MODEL_DIMENSIONS}차원이므로 차원을 맞추세요."
+                f"{spec['model_name']} 프로필({spec['profile_id']})은 {spec['dimensions']}차원입니다. "
+                "매핑과 임베딩 프로필을 맞춘 뒤 다시 시도하세요.", 409
             )
+        if require_dimensions:
+            meta = mappings.get("_meta", {}) if isinstance(mappings, dict) else {}
+            stored_recipe = meta.get("embedding_profile_recipe") if isinstance(meta, dict) else None
+            stored_fingerprint = meta.get("embedding_profile_sha256") if isinstance(meta, dict) else None
+            expected_recipe = embeddings.profile_recipe(profile_id)
+            expected_fingerprint = profile_fingerprint(expected_recipe)
+            if stored_recipe is None:
+                # Untagged legacy vectors are explicitly assumed to be the
+                # historical E5 recipe. Other profiles have unknown provenance.
+                if profile_id not in {None, embeddings.DEFAULT_PROFILE_ID} and not allow_untagged_empty_profile:
+                    raise ElasticsearchError(
+                        f"{concrete_index}의 임베딩은 프로필 출처가 확인되지 않습니다. E5(레거시) 또는 선택 프로필로 다시 벡터화하세요.", 409
+                    )
+            elif (not isinstance(stored_recipe, dict) or stored_fingerprint != profile_fingerprint(stored_recipe)
+                  or stored_fingerprint != expected_fingerprint):
+                raise ElasticsearchError(
+                    f"{concrete_index}의 임베딩 프로필이 선택한 {spec['profile_id']}과 일치하지 않습니다. "
+                    "기존 벡터를 정리한 뒤 같은 프로필로 다시 벡터화하세요.", 409
+                )
         if mapping.get("index", True) is not True:
             raise ElasticsearchError(f"{concrete_index}의 rag_embedding은 index가 비활성화되어 있습니다. index:true로 설정하세요.")
         element_type = mapping.get("element_type", "float")
@@ -98,8 +128,15 @@ def vector_mapping_targets(
     return first, set(concrete)
 
 
-def vector_mapping(connection: Connection, index: str, *, require_dimensions: bool = True) -> dict[str, Any]:
-    mapping, _ = vector_mapping_targets(connection, index, require_dimensions=require_dimensions)
+def vector_mapping(connection: Connection, index: str, *, require_dimensions: bool = True,
+                   profile_id: str | None = None,
+                   allow_untagged_empty_profile: bool = False) -> dict[str, Any]:
+    if profile_id is None:
+        mapping, _ = vector_mapping_targets(connection, index, require_dimensions=require_dimensions)
+    else:
+        mapping, _ = vector_mapping_targets(connection, index, require_dimensions=require_dimensions,
+                                            profile_id=profile_id,
+                                            allow_untagged_empty_profile=allow_untagged_empty_profile)
     return mapping
 
 
@@ -161,12 +198,21 @@ def _vector_search(
     size: int,
     filters: list[dict[str, str]] | None,
     source_fields: list[str],
+    profile_id: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    vector_mapping(connection, index)
+    spec = embeddings.profile_spec(profile_id)
+    recipe = embeddings.profile_recipe(profile_id)
+    if profile_id is None:
+        vector_mapping(connection, index)
+    else:
+        vector_mapping(connection, index, profile_id=profile_id)
     vectors = count_vectors(connection, index)
     if vectors == 0:
         raise ElasticsearchError("이 인덱스에 임베딩이 없습니다. 먼저 ‘임베딩 생성’을 실행하세요.")
-    query_vector = embeddings.embed_texts([query_text], "query")[0]
+    if profile_id is None:
+        query_vector = embeddings.embed_texts([query_text], "query")[0]
+    else:
+        query_vector = embeddings.embed_texts([query_text], "query", profile_id=profile_id)[0]
     filter_clauses = _filters(filters)
     knn: dict[str, Any] = {
         "field": "rag_embedding",
@@ -183,8 +229,10 @@ def _vector_search(
         "k": size,
         "num_candidates": knn["num_candidates"],
         "filter": knn.get("filter"),
-        "model": embeddings.MODEL_NAME,
-        "dimensions": embeddings.MODEL_DIMENSIONS,
+        "model": spec["model_name"],
+        "profile_id": spec["profile_id"],
+        "recipe": recipe,
+        "dimensions": spec["dimensions"],
     }
     return result, inspection
 
@@ -231,6 +279,7 @@ def search(
     mode: str = "bm25",
     rank_constant: int = 60,
     source_fields: list[str] | None = None,
+    profile_id: str | None = None,
 ) -> dict[str, Any]:
     index = validate_index(index)
     if mode not in {"bm25", "vector", "hybrid"}:
@@ -248,7 +297,7 @@ def search(
         )
     if mode in {"vector", "hybrid"}:
         vector_result, vector_info = _vector_search(
-            connection, index, query_text, size, filters, source_fields
+            connection, index, query_text, size, filters, source_fields, profile_id
         )
 
     if mode == "bm25":
@@ -282,4 +331,7 @@ def search(
         "total": total,
         "hits": hits,
         "vector_count": count_vectors(connection, index) if mode in {"vector", "hybrid"} else None,
+        "embedding_profile": ({"profile_id": vector_info["profile_id"], "model_name": vector_info["model"],
+                               "dimensions": vector_info["dimensions"], "recipe": vector_info["recipe"]}
+                              if vector_info else None),
     }

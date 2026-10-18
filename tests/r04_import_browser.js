@@ -75,7 +75,7 @@ async function main() {
       try { if (route.request().method() === "POST") body = route.request().postDataJSON(); } catch {}
       calls.push({ path: url.pathname, body });
       if (url.pathname === "/api/auth/session") return route.fulfill(json({ configured: true, authenticated: true, csrf_token: "mock-csrf", user: { id: "account-mock", username: "mock", display_name: "Mock", role: "user" } }));
-      if (url.pathname === "/api/health") return route.fulfill(json({ version: "1.10.0" }));
+      if (url.pathname === "/api/health") return route.fulfill(json({ version: "1.11.0" }));
       if (url.pathname === "/api/codebase-status") return route.fulfill(json({ indexed: false }));
       if (url.pathname === "/api/ai/status") return route.fulfill(json({ providers: [] }));
       if (url.pathname === "/api/concepts/list") return route.fulfill(json({ concepts: [] }));

@@ -6,7 +6,7 @@ Elasticsearch에 저장된 문서를 직접 검색하고, 검색 결과와 근�
 
 ## 개발 완료 목표
 
-현재 구현 작업 기준은 **R05 / v1.10.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
+현재 구현 작업 기준은 **R06 / v1.11.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
 
 ## 빠른 시작
 
@@ -79,12 +79,12 @@ docker run --name es-rag-local --detach \
 ### 공유 Elasticsearch 검색
 
 - **BM25:** 텍스트 필드, 필드 가중치, 필터, 하이라이트와 `_explain` 점수 근거를 살펴봅니다.
-- **벡터 검색:** 인덱스에 호환 벡터가 있을 때 사용하거나, 선택 동작으로 로컬 E5 임베딩을 만들 수 있습니다.
+- **벡터 검색:** 인덱스에 기록된 임베딩 프로필과 일치할 때 사용합니다. 기존 E5 기본값을 유지하며, E5 또는 multilingual MiniLM 로컬 프로필을 선택할 수 있습니다.
 - **하이브리드:** BM25와 벡터 결과 순위를 RRF 방식으로 합칩니다. 서로 다른 방식의 점수를 직접 비교하지 않습니다.
 - **개념 미리보기와 평가:** 기준 결과와 개념 적용 결과, 질의별 판단과 지표를 비교합니다. 설정 비교는 현재 BM25 모드만 지원합니다.
 - **청크 미리보기:** 문자, 문단 또는 고정 E5 토크나이저로 개인 지식의 청크와 원문 오프셋을 확인합니다. 토크나이저가 준비되지 않은 경우 토큰 청킹은 실행되지 않습니다.
 
-로컬 E5 모델을 사용하려면 선택 패키지를 설치합니다. 설치만으로 모델 파일을 받지는 않습니다. 앱에서 임베딩 생성을 직접 선택하면 `intfloat/multilingual-e5-large` 파일(약 2.24 GB)이 캐시에 처음 다운로드될 수 있습니다. 화면의 안내를 확인한 뒤 실행하세요. 임베딩은 선택 인덱스의 문서에 `rag_embedding` 필드를 부분 업데이트하므로 인덱스와 권한을 먼저 확인해야 합니다.
+로컬 임베딩을 사용하려면 선택 패키지를 설치합니다. 설치만으로 모델 파일을 받지는 않습니다. E5(`intfloat/multilingual-e5-large`, 1024차원)와 multilingual MiniLM(`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, 384차원)을 선택할 수 있으며, 앱은 선택한 모델의 캐시 준비 상태와 레시피를 표시합니다. 캐시되지 않은 모델을 받을 때는 동의 안내와 예상 다운로드를 확인하세요. 프로필이 다른 기존 벡터는 선택한 모델과 호환된다고 가정하지 않습니다. 문서 임베딩은 선택 인덱스의 `rag_embedding` 필드를 부분 업데이트하므로 인덱스와 권한을 먼저 확인해야 합니다. 자세한 계약과 검증 범위는 [API 계약](docs/api-contract.md) 및 [v1.11.0 acceptance](docs/acceptance/v1.11.0.md)를 참고하세요.
 
 ```bash
 .venv/bin/python -m pip install -e '.[semantic]'
@@ -100,7 +100,7 @@ docker run --name es-rag-local --detach \
 .venv/bin/python -m pip install -e '.[private-vector]'
 ```
 
-벡터 동기화는 추가 설치와 화면 내 명시적 다운로드 동의가 필요합니다. 토크나이저(약 18 MB)와 E5 모델(약 2.24 GB)이 다운로드될 수 있습니다. BM25 동기화와 검색은 모델을 다운로드하지 않습니다.
+벡터 동기화는 추가 설치와 화면 내 명시적 다운로드 동의가 필요합니다. 선택한 프로필의 모델 파일과 tokenizer가 처음에 캐시될 수 있습니다. 현재 기본 E5 모델은 약 2.24 GB이며 크기가 작은 대체 프로필은 앱의 선택 화면에 표시되는 안내를 확인하세요. BM25 동기화와 검색은 모델을 다운로드하지 않습니다. 벡터 프로필은 계정별로 저장되며 프로필 변경 후 벡터를 다시 동기화해야 합니다.
 
 ### 선택 기능: AI 개념 도우미
 
@@ -153,6 +153,7 @@ Elasticsearch 주소, 인덱스와 인증 정보를 브라우저에서 입력합
 | 계정과 로컬 저장 | [Cycle 37 계정 acceptance](docs/cycle37-local-account-acceptance.md) |
 | 개인 지식 라이브러리와 벡터 동기화 | [API](docs/cycle38-private-knowledge-api.md), [벡터 설계](docs/cycle43-private-vector-design.md), [Cycle 43 acceptance](docs/cycle43-acceptance.md) |
 | 청크 정책과 복구 가능한 재색인 | [API와 저장 계약](docs/api-contract.md), [v1.10.0 R05 acceptance](docs/acceptance/v1.10.0.md) |
+| 임베딩 프로필과 벡터 호환성 | [API와 저장 계약](docs/api-contract.md), [v1.11.0 R06 acceptance](docs/acceptance/v1.11.0.md) |
 | 실험 비교와 내보내기 | [비교 연구](docs/experiment-comparison-research.md), [내보내기 연구](docs/experiment-export-research.md), [내보내기 acceptance](docs/experiment-export-acceptance.md) |
 
 ## 문제 해결

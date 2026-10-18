@@ -1,7 +1,7 @@
 {
   "plan": "docs/roadmap/oss-readiness-plan.md",
   "plan_id": "oss-readiness-v1-16",
-  "recorded_at": "2026-10-18",
+  "recorded_at": "2026-10-19",
   "baseline": {
     "stable_tag": "v1.5.0",
     "stable_tag_object": "f8e9fc51dce4663d74b2c4c16ec80fa8a0704dd1",
@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.10.0",
-  "current_stage": "R05",
+  "current_version": "1.11.0",
+  "current_stage": "R06",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 15
+    "started_rounds": 19
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -131,7 +131,7 @@
     {
       "stage": "R05",
       "version": "1.10.0",
-      "status": "in_progress",
+      "status": "complete",
       "owner_roles": [
         "C",
         "B",
@@ -144,21 +144,27 @@
         "docs/acceptance/v1.10.0-independent-qa-round1.md",
         "docs/acceptance/v1.10.0-independent-qa-fix1.md"
       ],
-      "commit": null,
-      "blockers": []
+      "commit": "ee9bd14b131bae4654083255784db7f78233d960",
+      "blockers": [
+        "Representative retrieval quality remains NOT RUN in R05; the live lifecycle corpus was synthetic. Quality evaluation remains required in the later judged-corpus stages."
+      ],
+      "tag": "v1.10.0"
     },
     {
       "stage": "R06",
       "version": "1.11.0",
-      "status": "pending",
+      "status": "in_progress",
       "owner_roles": [
         "B",
         "A",
         "F"
       ],
       "required_gates": "docs/acceptance/v1.11.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
+      "fix_rounds_used": 3,
+      "evidence": [
+        "docs/acceptance/v1.11.0.md",
+        "docs/acceptance/v1.11.0-independent-qa.md"
+      ],
       "commit": null,
       "blockers": []
     },
@@ -259,55 +265,49 @@
   ],
   "current_gates": [
     {
-      "id": "strategy-validation-chunk-boundaries",
+      "id": "profile-registry-recipe-fingerprint",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "real-tokenizer-evidence",
+      "id": "actual-local-model-execution",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "source-revision-active-chunks",
+      "id": "shared-index-profile-compatibility",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "job-progress-cancel-retry-restart",
+      "id": "private-profile-generation-isolation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "private-generation-alias-replacement",
+      "id": "cache-install-download-failures",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "account-isolation",
+      "id": "migration-e5-backward-compatibility",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     },
     {
-      "id": "migration-source-preservation",
+      "id": "browser-docs-package-regression",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
-    },
-    {
-      "id": "browser-docs-regression",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      "evidence": "docs/acceptance/v1.11.0.md"
     }
   ],
-  "completed_commit": "3eb09bf692de8a0338279f6e7f9c9df4de554419",
+  "completed_commit": "ee9bd14b131bae4654083255784db7f78233d960",
   "remaining_blockers": [
     "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. Recheck with the content owners or remove/replace the data before public release.",
     "GitHub-hosted CI has not run; verify after the final authorized branch push.",
