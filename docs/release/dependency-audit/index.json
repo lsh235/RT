@@ -1,0 +1,171 @@
+[
+  {
+    "environment": "py310-agents",
+    "inventory_file": "py310-agents-resolved-inventory.json",
+    "dependency_count": 12,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "openai-codex",
+        "version": "0.163.0"
+      }
+    ],
+    "license_metadata_missing": [],
+    "license_notice_file_missing": [
+      "openai-codex==0.163.0",
+      "openai-codex-cli-bin==0.163.0"
+    ]
+  },
+  {
+    "environment": "py311-agents",
+    "inventory_file": "py311-agents-resolved-inventory.json",
+    "dependency_count": 21,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "github-copilot-sdk",
+        "version": "1.0.22"
+      },
+      {
+        "name": "openai-codex",
+        "version": "0.163.0"
+      }
+    ],
+    "license_metadata_missing": [],
+    "license_notice_file_missing": [
+      "github-copilot-sdk==1.0.22",
+      "openai-codex==0.163.0",
+      "openai-codex-cli-bin==0.163.0"
+    ]
+  },
+  {
+    "environment": "py312-agents",
+    "inventory_file": "py312-agents-resolved-inventory.json",
+    "dependency_count": 21,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "github-copilot-sdk",
+        "version": "1.0.22"
+      },
+      {
+        "name": "openai-codex",
+        "version": "0.163.0"
+      }
+    ],
+    "license_metadata_missing": [],
+    "license_notice_file_missing": [
+      "github-copilot-sdk==1.0.22",
+      "openai-codex==0.163.0",
+      "openai-codex-cli-bin==0.163.0"
+    ]
+  },
+  {
+    "environment": "py312-private-vector",
+    "inventory_file": "py312-private-vector-resolved-inventory.json",
+    "dependency_count": 32,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "fastembed",
+        "version": "0.9.0"
+      },
+      {
+        "name": "huggingface_hub",
+        "version": "1.33.0"
+      },
+      {
+        "name": "tokenizers",
+        "version": "0.23.3"
+      }
+    ],
+    "license_metadata_missing": [
+      "py_rust_stemmers==0.1.8"
+    ],
+    "license_notice_file_missing": [
+      "tokenizers==0.23.3",
+      "loguru==0.7.3",
+      "flatbuffers==25.12.19"
+    ]
+  },
+  {
+    "environment": "py312-reranker",
+    "inventory_file": "py312-reranker-resolved-inventory.json",
+    "dependency_count": 64,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "sentence-transformers",
+        "version": "5.7.0"
+      }
+    ],
+    "license_metadata_missing": [
+      "cuda-toolkit==13.0.3.0"
+    ],
+    "license_notice_file_missing": [
+      "tokenizers==0.23.3",
+      "cuda-toolkit==13.0.3.0"
+    ]
+  },
+  {
+    "environment": "py312-semantic",
+    "inventory_file": "py312-semantic-resolved-inventory.json",
+    "dependency_count": 32,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "fastembed",
+        "version": "0.9.0"
+      }
+    ],
+    "license_metadata_missing": [
+      "py_rust_stemmers==0.1.8"
+    ],
+    "license_notice_file_missing": [
+      "loguru==0.7.3",
+      "tokenizers==0.23.3",
+      "flatbuffers==25.12.19"
+    ]
+  },
+  {
+    "environment": "py312-token-preview",
+    "inventory_file": "py312-token-preview-resolved-inventory.json",
+    "dependency_count": 20,
+    "direct_resolved": [
+      {
+        "name": "argon2-cffi",
+        "version": "25.1.0"
+      },
+      {
+        "name": "huggingface_hub",
+        "version": "1.33.0"
+      },
+      {
+        "name": "tokenizers",
+        "version": "0.23.3"
+      }
+    ],
+    "license_metadata_missing": [],
+    "license_notice_file_missing": [
+      "tokenizers==0.23.3"
+    ]
+  }
+]

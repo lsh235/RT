@@ -2,6 +2,13 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.16.0-rc.1] - Validation checkpoint (2026-10-19)
+
+- Draft Korean and English installation, support, upgrade/recovery, security, contributor, and dependency/asset inventory guidance.
+- Independent QA passed the offline, browser, clean wheel-install, disposable Elasticsearch, migration/restore, and loopback Compose checks. Repeated wheel builds matched byte-for-byte; repeated same-project Docker builds matched image ID, config, rootfs layers, and saved archive on the tested host/toolchain.
+- The wheel and Docker image contain the bundled gRPC Jira sample, but separate redistribution permission has not been received or verified. Optional dependency license/notice and model artifact rights reviews remain incomplete; no RC tag or public distribution is authorized by this checkpoint.
+- No retrieval-quality, production-readiness, or third-party sample redistribution claim is made.
+
 ## [1.15.0] - 2026-10-19
 
 - Add explicit profile-based runtime examples and a bounded, deduplicated context bundle with a named caller-supplied token counter.

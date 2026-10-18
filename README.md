@@ -8,6 +8,18 @@ Elasticsearch에 저장된 문서를 직접 검색하고, 검색 결과와 근�
 
 R10 / v1.15.0의 일곱 구현 게이트는 독립 QA에서 통과했고 승인 태그를 만들었습니다. 현재 작업은 **R11 / v1.16.0-rc.1**입니다. 별도 허가 증빙이 아직 확인되지 않아 번들 gRPC Jira 샘플의 재배포 권리는 미해결이며, 이를 Apache-2.0 코드 라이선스로 추정하지 않습니다. [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행하고 있습니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
 
+## 공개 설치 및 기여 안내
+
+R11 / v1.16.0-rc.1의 설치, 지원 범위, 업그레이드/복구, 보안, 기여 및 의존성·제3자 자산 근거 문서는 아래에서 확인할 수 있습니다. 독립 QA가 오프라인·브라우저·패키지·임시 Elasticsearch·Compose 흐름과 같은 호스트에서 반복한 wheel/image 빌드를 검증했습니다. 그러나 번들 샘플은 현재 wheel과 Docker image에 포함되고 별도 재배포 허가가 확인되지 않았습니다. 선택 의존성 고지와 모델 자산 권리 감사도 미완료이므로 공개 배포 후보는 NO-GO입니다.
+
+- [설치 안내](docs/install.md) · [Compose 안내](docs/compose.md) · [지원 범위](docs/support-matrix.md) · [업그레이드와 복구](docs/upgrade.md)
+- [보안 정책](SECURITY.md) · [기여 안내](CONTRIBUTING.md) · [의존성 및 자산 목록](docs/release/dependency-license-inventory.md) · [제3자 자산 감사](docs/release/third-party-asset-audit.md)
+- [R11 acceptance 및 현재 gate](docs/acceptance/v1.16.0-rc.1.md) · [변경 기록](CHANGELOG.md)
+
+## Public installation and contributor documentation
+
+The R11 / v1.16.0-rc.1 guidance is available in Korean and English in paired sections: [install](docs/install.md), [Compose](docs/compose.md), [support matrix](docs/support-matrix.md), [upgrade and recovery](docs/upgrade.md), [security](SECURITY.md), [contributing](CONTRIBUTING.md), [dependency and asset inventory](docs/release/dependency-license-inventory.md), and [third-party asset audit](docs/release/third-party-asset-audit.md). Independent QA validated the offline, browser, package, disposable Elasticsearch and Compose paths, plus repeated wheel/image builds on the same host and toolchain. The bundled sample is present in the wheel and Docker image, and separate redistribution permission has not been received or verified. Optional dependency notices and model asset rights also remain incomplete, so public distribution is NO-GO. See the [acceptance record](docs/acceptance/v1.16.0-rc.1.md) and [changelog](CHANGELOG.md).
+
 ## 빠른 시작
 
 필요한 것: Python 3.10 이상, 브라우저, 연결할 Elasticsearch 주소. BM25 검색은 추가 임베딩 패키지 없이 사용할 수 있습니다. 계정 부트스트랩은 로컬 관리자를 만듭니다.

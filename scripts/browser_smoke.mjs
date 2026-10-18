@@ -54,7 +54,7 @@ try {
     if (!healthResponse.ok) throw new Error(`health endpoint returned HTTP ${healthResponse.status}`);
     return healthResponse.json();
   });
-  if (typeof health.version !== 'string' || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(health.version)) throw new Error(`health version was invalid: ${health.version}`);
+  if (typeof health.version !== 'string' || !/^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:[-+][0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/i.test(health.version)) throw new Error(`health version was invalid: ${health.version}`);
   if (initialVersion !== `v${health.version}`) throw new Error(`static UI version ${initialVersion} did not match health version ${health.version}`);
   await page.locator('body').waitFor();
   await page.waitForFunction(version => document.querySelector('#server-version')?.textContent === `v${version}`, health.version);
