@@ -24,6 +24,9 @@ _STATE_REQUIRED = {
     "concept_versions": {"version_id", "concept_id", "version_number", "body", "fingerprint", "created_at", "is_current"},
     "judgments": {"concept_id", "query_id", "document_index", "document_id", "rating", "pinned", "reason", "updated_at"},
     "runs": {"id", "concept_id", "created_at", "kind", "body"},
+    "evaluation_datasets": {"dataset_id", "name", "created_at"},
+    "evaluation_dataset_versions": {"version_id", "dataset_id", "version_number", "fingerprint", "body", "created_at"},
+    "evaluation_runs": {"id", "dataset_id", "version_id", "created_at", "body"},
     "knowledge_documents": {"id", "title", "source_label", "content", "content_bytes", "created_at", "updated_at"},
     "knowledge_chunks": {"id", "document_id", "ordinal", "start_offset", "end_offset", "content"},
     "knowledge_chunk_policy": {"id", "policy_json", "policy_sha256", "updated_at"},
@@ -265,7 +268,16 @@ def _state_v4(db: sqlite3.Connection) -> None:
             db.execute("UPDATE knowledge_es_state SET vector_profile_id='e5-multilingual-large',vector_profile_recipe=? WHERE id=?", (recipe_text, row[0]))
 
 
-_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2, 3: _state_v3, 4: _state_v4}, "control": {1: _control_v1}}
+def _state_v5(db: sqlite3.Connection) -> None:
+    """Add account-local immutable evaluation dataset versions and run snapshots."""
+    db.execute("CREATE TABLE IF NOT EXISTS evaluation_datasets (dataset_id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS evaluation_dataset_versions (version_id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL REFERENCES evaluation_datasets(dataset_id), version_number INTEGER NOT NULL, fingerprint TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(dataset_id, version_number))")
+    db.execute("CREATE INDEX IF NOT EXISTS evaluation_dataset_versions_latest ON evaluation_dataset_versions(dataset_id, version_number DESC)")
+    db.execute("CREATE TABLE IF NOT EXISTS evaluation_runs (id TEXT PRIMARY KEY, dataset_id TEXT NOT NULL, version_id TEXT NOT NULL, created_at TEXT NOT NULL, body TEXT NOT NULL)")
+    db.execute("CREATE INDEX IF NOT EXISTS evaluation_runs_dataset ON evaluation_runs(dataset_id, version_id, created_at DESC)")
+
+
+_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2, 3: _state_v3, 4: _state_v4, 5: _state_v5}, "control": {1: _control_v1}}
 
 
 def migrate(db: sqlite3.Connection, component: str) -> None:

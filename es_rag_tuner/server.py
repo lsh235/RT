@@ -23,6 +23,7 @@ from . import concepts
 from . import ai_coach
 from . import token_preview
 from . import reranker as local_reranker
+from . import evaluation_datasets
 from . import auth
 from . import knowledge
 from . import post_routes
@@ -56,6 +57,7 @@ STATIC_FILES = {
 # accommodates the 20 MiB account quota plus JSON framing on restore routes.
 _ORDINARY_JSON_LIMIT = 2 * 1024 * 1024
 _RESTORE_JSON_LIMIT = 128 * 1024 * 1024
+_DATASET_JSON_LIMIT = 12 * 1024 * 1024
 ALLOWED_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 DISPLAY_FIELDS = [
     "issue_key", "summary", "status", "priority", "components", "error_signature",
@@ -400,6 +402,13 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
                 if not auth.verify_csrf(session_id, self.headers.get("X-CSRF-Token")):
                     raise auth.AuthError("CSRF validation failed", 403)
                 max_bytes = _RESTORE_JSON_LIMIT
+            if path == "/api/evaluation/datasets/import" and content_length > _ORDINARY_JSON_LIMIT:
+                import_user = auth.authenticate(session_id)
+                if not import_user:
+                    raise auth.AuthError("Authentication required", 401)
+                if not auth.verify_csrf(session_id, self.headers.get("X-CSRF-Token")):
+                    raise auth.AuthError("CSRF validation failed", 403)
+                max_bytes = _DATASET_JSON_LIMIT
             payload = self._read_json(max_bytes=max_bytes)
             if path == "/api/auth/login":
                 nonce = self._cookies().get("es_rag_login_nonce")
@@ -974,6 +983,55 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
     def _concept_run_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         return concepts.export_run(str(payload.get("concept_id", "")), str(payload.get("run_id", "")))
+
+    def _evaluation_dataset_create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.create_dataset(
+            payload.get("name"), payload.get("provenance"), payload.get("queries"), payload.get("qrels"),
+            payload.get("unjudged_policy", "judged_only"), payload.get("qrels_complete", False),
+        )
+
+    def _evaluation_dataset_version_create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.create_version(
+            payload.get("dataset_id"), payload.get("base_version_id"), payload.get("name"),
+            payload.get("provenance"), payload.get("queries"), payload.get("qrels"),
+            payload.get("unjudged_policy", "judged_only"), payload.get("qrels_complete", False),
+        )
+
+    @staticmethod
+    def _evaluation_dataset_import(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.import_dataset(payload.get("format"), payload.get("content"))
+
+    @staticmethod
+    def _evaluation_dataset_list(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.list_datasets(str(payload.get("dataset_id", "")))
+
+    @staticmethod
+    def _evaluation_dataset_detail(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.get_dataset_version(payload.get("dataset_id"), payload.get("version_id"))
+
+    @staticmethod
+    def _evaluation_dataset_export(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.export_dataset(payload.get("dataset_id"), payload.get("version_id"), payload.get("format"))
+
+    def _evaluation_dataset_evaluate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.evaluate(
+            self._connection(payload), payload.get("index", ""), payload.get("dataset_id"),
+            payload.get("version_id"), payload.get("split"), payload.get("mode", "bm25"),
+            payload.get("settings", {}), payload.get("cutoff"), payload.get("configuration_frozen", False),
+        )
+
+    @staticmethod
+    def _evaluation_runs_list(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.list_runs(payload.get("dataset_id"), payload.get("version_id"))
+
+    @staticmethod
+    def _evaluation_run_export(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.export_run(payload.get("dataset_id"), payload.get("version_id"), payload.get("run_id"))
+
+    @staticmethod
+    def _evaluation_runs_compare(payload: dict[str, Any]) -> dict[str, Any]:
+        return evaluation_datasets.compare_runs(payload.get("dataset_id"), payload.get("version_id"),
+                                                payload.get("left_run_id"), payload.get("right_run_id"))
 
     def _ai_status(self, payload: dict[str, Any]) -> dict[str, Any]:
         return ai_coach.status()

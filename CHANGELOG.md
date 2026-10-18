@@ -2,6 +2,14 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.13.0] - 2026-10-19
+
+- Add account-scoped, immutable evaluation dataset versions with CSV/JSONL query and qrel import/export, canonical fingerprints, and source/rights/judgment provenance.
+- Add train/validation/test split checks for shared information needs, query duplicates and near-duplicates, exact documents, and declared document families.
+- Report Precision, Recall, MRR, nDCG, judged coverage, unknown/unjudged counts, query-level missed relevant documents, and same-corpus run comparisons with explicit metric policies.
+- Keep AI-suggested judgments separate from human-reviewed ground truth and require a frozen configuration for a one-time test run per dataset version/corpus.
+- Preserve the existing 25-document Jira evaluation as a regression fixture; no permission-cleared representative qrels are bundled and no retrieval-quality improvement is claimed.
+
 ## [1.12.0] - 2026-10-19
 
 - Give BM25, vector, and hybrid search one bounded candidate-pool and final top-K interface, while preserving filters, embedding profiles, and concrete alias document identity.

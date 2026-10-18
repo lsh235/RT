@@ -14,7 +14,7 @@
       <span class="brand-mark">ES</span>
       <span><strong>Retrieval Workbench</strong><small>Elasticsearch · RAG quality lab</small></span>
     </a>
-  <div class="top-meta"><label class="language-control" for="ui-language">Language</label><select id="ui-language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.12.0</span></div>
+  <div class="top-meta"><label class="language-control" for="ui-language">Language</label><select id="ui-language" aria-label="Language"><option value="ko">한국어</option><option value="en">English</option></select><span id="identity-indicator" class="identity-indicator hidden"></span><button id="logout-button" class="button button-secondary button-small hidden" type="button">로그아웃</button><span class="local-pill"><i></i> LOCAL ONLY</span><span id="server-version">v1.13.0</span></div>
   </header>
 
   <main id="auth-screen" class="auth-screen" aria-labelledby="auth-title">
@@ -209,6 +209,65 @@
 
       <section id="evaluation-panel" class="tab-panel" role="tabpanel" hidden>
         <div class="panel-intro"><div><h2>평가 및 튜닝</h2><p>선택한 검색 방식으로 Q01–Q10 정답 키 기준 Recall, MRR, nDCG를 계산합니다.</p></div><span class="label-chip">BM25 · 벡터 · 하이브리드 평가</span></div>
+        <section id="evaluation-datasets" class="evaluation-datasets card" aria-labelledby="evaluation-datasets-title">
+          <div class="dataset-workspace-heading"><div><h3 id="evaluation-datasets-title" data-r08-i18n="title">계정 전용 평가 데이터셋</h3><p data-r08-i18n="intro">버전이 고정된 질의와 관련도 판단으로 평가를 재현합니다. 기존 Q01–Q10은 별도 회귀 fixture입니다.</p></div><div class="dataset-heading-actions"><button id="evaluation-dataset-create" type="button" class="button button-secondary button-small" data-r08-i18n="createDataset">새 데이터셋</button><button id="evaluation-datasets-refresh" type="button" class="button button-secondary button-small" data-r08-i18n="refresh">데이터셋 새로고침</button></div></div>
+          <p class="notice notice-muted dataset-evidence-boundary" data-r08-i18n="boundary">검색 품질을 보여주는 영역이 아니라 평가 자료와 계산 근거를 관리합니다. 데이터 출처와 판단 유형을 구분하며 AI 제안은 자동으로 정답이 되지 않습니다.</p>
+          <div class="evaluation-dataset-import">
+            <div><h4 data-r08-i18n="importTitle">질의/qrels CSV 또는 JSONL 가져오기</h4><p class="helper-text" data-r08-i18n="importHelp">내보낸 dataset envelope를 가져오면 immutable dataset version을 보존합니다. 단순 CSV/JSONL은 필수 metadata와 provenance가 있어야 합니다.</p></div>
+            <label class="field-label" for="evaluation-dataset-file" data-r08-i18n="file">데이터셋 파일</label><input id="evaluation-dataset-file" class="text-input" type="file" accept=".csv,.jsonl,.ndjson,text/csv,application/x-ndjson">
+            <label class="field-label" for="evaluation-dataset-format" data-r08-i18n="format">파일 형식</label><select id="evaluation-dataset-format" class="text-input"><option value="jsonl">JSONL</option><option value="csv">CSV</option></select>
+            <button id="evaluation-dataset-import" type="button" class="button button-primary" data-r08-i18n="import">가져와 새 버전 만들기</button>
+            <p id="evaluation-dataset-import-status" class="dataset-status" role="status" aria-live="polite"></p>
+          </div>
+          <div class="dataset-selector-row">
+            <label class="field-label" for="evaluation-dataset-select" data-r08-i18n="dataset">데이터셋</label><select id="evaluation-dataset-select" class="text-input"><option value="">데이터셋 선택</option></select>
+            <label class="field-label" for="evaluation-dataset-version" data-r08-i18n="version">고정 버전</label><select id="evaluation-dataset-version" class="text-input" disabled><option value="">버전을 선택하세요</option></select>
+            <label class="field-label" for="evaluation-dataset-export-format" data-r08-i18n="exportFormat">내보내기 형식</label><select id="evaluation-dataset-export-format" class="text-input"><option value="jsonl">JSONL</option><option value="csv">CSV</option></select>
+            <button id="evaluation-dataset-export" type="button" class="button button-secondary" disabled data-r08-i18n="export">버전 내보내기</button>
+          </div>
+          <div id="evaluation-dataset-provenance" class="dataset-provenance" aria-live="polite"></div>
+          <details class="dataset-provenance-editor" open>
+            <summary data-r08-i18n="provenanceTitle">출처와 판단 provenance</summary>
+            <div class="dataset-provenance-fields">
+              <label class="field-label" for="evaluation-dataset-name" data-r08-i18n="name">데이터셋 이름</label><input id="evaluation-dataset-name" class="text-input" maxlength="160">
+              <label class="field-label" for="evaluation-source-name" data-r08-i18n="sourceName">출처 이름</label><input id="evaluation-source-name" class="text-input" maxlength="500">
+              <label class="field-label" for="evaluation-source-uri" data-r08-i18n="sourceUri">출처 URI</label><input id="evaluation-source-uri" class="text-input" type="url" maxlength="2000">
+              <label class="field-label" for="evaluation-license" data-r08-i18n="license">라이선스 / 이용 약관</label><input id="evaluation-license" class="text-input" maxlength="500">
+              <label class="field-label" for="evaluation-permission" data-r08-i18n="permission">권한 상태</label><input id="evaluation-permission" class="text-input" maxlength="500">
+              <label class="field-label" for="evaluation-collected-at" data-r08-i18n="collectedAt">수집 날짜</label><input id="evaluation-collected-at" class="text-input" type="date">
+              <label class="field-label" for="evaluation-subset-rules" data-r08-i18n="subsetRules">추출 / subset 규칙</label><textarea id="evaluation-subset-rules" class="text-input" rows="2" maxlength="4000"></textarea>
+              <label class="field-label" for="evaluation-omitted-relevant" data-r08-i18n="omittedRelevant">누락된 것으로 알려진 관련 문서</label><textarea id="evaluation-omitted-relevant" class="text-input" rows="2" maxlength="4000"></textarea>
+              <label class="field-label" for="evaluation-judgment-source" data-r08-i18n="judgmentSource">판단 출처</label><select id="evaluation-judgment-source" class="text-input"><option value="synthetic">synthetic</option><option value="public_qrels">public_qrels</option><option value="human">human</option><option value="ai_suggestion">ai_suggestion</option></select>
+              <label class="field-label" for="evaluation-assessor" data-r08-i18n="assessor">평가자 / provenance 설명</label><input id="evaluation-assessor" class="text-input" maxlength="1000">
+            </div>
+          </details>
+          <div class="dataset-editor-toolbar"><div><h4 data-r08-i18n="editorTitle">질의 및 qrels 편집</h4><p data-r08-i18n="editorHelp">저장하면 현재 버전을 덮어쓰지 않고 새 immutable version을 만듭니다. 정보 요구 그룹은 한 split에만 둘 수 있습니다.</p></div><button id="evaluation-dataset-add-query" type="button" class="button button-secondary button-small" disabled data-r08-i18n="addQuery">질의 추가</button></div>
+          <div class="dataset-editor-policy">
+            <label class="field-label" for="evaluation-unjudged-policy" data-r08-i18n="unjudgedPolicy">미평가 문서 정책</label>
+            <select id="evaluation-unjudged-policy" class="text-input"><option value="judged_only">judged_only · 수치 판단 문서만 점수 계산</option><option value="unjudged_as_nonrelevant">unjudged_as_nonrelevant · 미평가를 0으로 포함</option></select>
+            <label class="dataset-inline-check"><input id="evaluation-qrels-complete" type="checkbox"><span data-r08-i18n="qrelsComplete">qrels가 완전하다고 확인했습니다</span></label>
+            <p class="notice notice-muted" data-r08-i18n="unjudgedHelp">기본값 judged_only입니다. qrel 행 없음은 unknown, grade=null은 명시적 미평가, grade=0은 수치로 판단한 무관입니다. 미평가를 0으로 처리하려면 qrels 완전성 확인이 필요합니다.</p>
+          </div>
+          <div id="evaluation-dataset-editor" class="dataset-query-list" aria-live="polite"><p class="muted" data-r08-i18n="selectDataset">계정 전용 데이터셋을 선택하거나 가져오세요.</p></div>
+          <div class="dataset-version-actions"><button id="evaluation-dataset-save-version" type="button" class="button button-primary" disabled data-r08-i18n="saveVersion">수정 내용을 새 버전으로 저장</button><p id="evaluation-dataset-edit-status" class="dataset-status" role="status" aria-live="polite"></p></div>
+          <section class="dataset-run-controls" aria-labelledby="dataset-run-title">
+            <div><h4 id="dataset-run-title" data-r08-i18n="runTitle">선택 버전 평가</h4><p class="helper-text" data-r08-i18n="runHelp">기록에는 버전 fingerprint, split, cutoff, index/corpus, 검색 설정이 함께 저장됩니다. test는 설정 고정 후에만 평가하세요.</p></div>
+            <label class="field-label" for="evaluation-split" data-r08-i18n="split">split</label><select id="evaluation-split" class="text-input"><option value="train">train</option><option value="validation">validation</option><option value="test">test</option></select>
+            <label class="field-label" for="evaluation-dataset-mode" data-r08-i18n="mode">검색 방식</label><select id="evaluation-dataset-mode" class="text-input"><option value="bm25">BM25</option><option value="vector">Vector</option><option value="hybrid">Hybrid · RRF</option></select>
+            <label class="field-label" for="evaluation-cutoff" data-r08-i18n="cutoff">cutoff</label><input id="evaluation-cutoff" class="text-input" type="number" min="1" max="50" value="10">
+            <label class="dataset-inline-check"><input id="evaluation-config-frozen" type="checkbox"><span data-r08-i18n="configFrozen">검색 설정을 고정했습니다</span></label>
+            <button id="evaluation-dataset-run" type="button" class="button button-primary" disabled data-r08-i18n="run">선택 split 평가</button>
+          </section>
+          <div id="evaluation-dataset-run-status" class="dataset-status" role="status" aria-live="polite"></div>
+          <div id="evaluation-dataset-run-results"></div>
+          <section class="dataset-run-compare" aria-labelledby="dataset-compare-title">
+            <div><h4 id="dataset-compare-title" data-r08-i18n="compareTitle">같은 버전의 두 실행 비교</h4><p class="helper-text" data-r08-i18n="compareHelp">query별 metric delta, 회귀, 누락된 관련 문서와 미평가 회수를 살펴봅니다. dataset version, index/corpus, split, cutoff가 일치해야 합니다.</p></div>
+            <label class="field-label" for="evaluation-run-left" data-r08-i18n="runA">첫 실행</label><select id="evaluation-run-left" class="text-input" disabled><option value="">실행 선택</option></select>
+            <label class="field-label" for="evaluation-run-right" data-r08-i18n="runB">둘째 실행</label><select id="evaluation-run-right" class="text-input" disabled><option value="">실행 선택</option></select>
+            <button id="evaluation-run-compare" type="button" class="button button-secondary" disabled data-r08-i18n="compare">실행 비교</button>
+            <div id="evaluation-run-compare-results" aria-live="polite"></div>
+          </section>
+        </section>
         <div class="target-callout"><div><strong>완료 기준</strong><span>Recall@5 0.90 이상과 MRR@5 0.80 이상을 모두 만족</span></div><div class="target-number">목표 점수</div></div>
         <div class="evaluation-actions card"><div><h3>현재 프로필 평가</h3><p>현재 필드 가중치를 10개 기준 질의에 적용합니다.</p></div><button id="evaluate-button" class="button button-secondary" disabled>평가 실행</button></div>
         <div class="evaluation-actions card"><div><h3>필드 가중치 자동 탐색</h3><p>BM25 필드 가중치를 바꿔가며 목표 점수에 가까운 프로필을 찾습니다. 벡터와 하이브리드 평가는 검색 방식에서 비교하세요.</p></div><div class="tune-control"><select id="tune-passes" aria-label="탐색 반복 횟수"><option value="1">1회</option><option value="2" selected>2회</option><option value="3">3회</option></select><button id="tune-button" class="button button-primary" disabled>튜닝 시작</button></div></div>

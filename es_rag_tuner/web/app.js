@@ -104,6 +104,11 @@ const state = {
   rerankerStatus: null,
   rerankerPrepareInProgress: false,
   rerankerError: "",
+  evaluationDatasets: [],
+  evaluationDataset: null,
+  evaluationVersion: null,
+  evaluationDatasetDraft: null,
+  evaluationRuns: [],
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -204,6 +209,49 @@ const UI_COPY = {
 
 function copy(key) { return UI_COPY[state.locale]?.[key] || UI_COPY.ko[key] || key; }
 
+const R08_COPY = {
+  ko: {
+    title: "계정 전용 평가 데이터셋", intro: "버전이 고정된 질의와 관련도 판단으로 평가를 재현합니다. 기존 Q01–Q10은 별도 회귀 fixture입니다.", refresh: "데이터셋 새로고침", createDataset: "새 데이터셋",
+    boundary: "검색 품질을 보여주는 영역이 아니라 평가 자료와 계산 근거를 관리합니다. 데이터 출처와 판단 유형을 구분하며 AI 제안은 자동으로 정답이 되지 않습니다.",
+    importTitle: "질의/qrels CSV 또는 JSONL 가져오기", importHelp: "내보낸 dataset envelope를 가져오면 immutable dataset version을 보존합니다. 단순 CSV/JSONL은 필수 metadata와 provenance가 있어야 합니다.", file: "데이터셋 파일", format: "파일 형식", import: "가져와 버전 확인", dataset: "데이터셋", version: "고정 버전", exportFormat: "내보내기 형식", export: "버전 내보내기",
+    provenanceTitle: "출처와 판단 provenance", name: "데이터셋 이름", sourceName: "출처 이름", sourceUri: "출처 URI", license: "라이선스 / 이용 약관", permission: "권한 상태", collectedAt: "수집 날짜", subsetRules: "추출 / subset 규칙", omittedRelevant: "누락된 것으로 알려진 관련 문서", judgmentSource: "판단 출처", assessor: "평가자 / provenance 설명",
+    editorTitle: "질의 및 qrels 편집", editorHelp: "최신 버전을 기준으로만 새 immutable version을 만들 수 있습니다. 이전 버전은 조회·내보내기할 수 있습니다. 정보 요구 그룹은 한 split에만 둘 수 있습니다. 같은 그룹/문서 계열이 split을 넘으면 저장이 거부됩니다. 중복 질의는 정규화 일치 또는 문자 trigram Jaccard ≥ 0.80이면 충돌로 봅니다.", addQuery: "질의 추가",
+    unjudgedPolicy: "미평가 문서 정책", qrelsComplete: "qrels가 완전하다고 확인했습니다", unjudgedHelp: "기본값 judged_only입니다. qrel 행 없음은 unknown, grade=null은 명시적 미평가, grade=0은 수치로 판단한 무관입니다. 미평가를 0으로 처리하려면 qrels 완전성 확인이 필요합니다.", selectDataset: "계정 전용 데이터셋을 선택하거나 가져오세요.", saveVersion: "수정 내용을 새 버전으로 저장",
+    runTitle: "선택 버전 평가", runHelp: "기록에는 버전 fingerprint, split, cutoff, index/corpus, 검색 설정이 함께 저장됩니다. test는 설정 고정 후에만 평가하세요.", split: "split", mode: "검색 방식", cutoff: "cutoff", configFrozen: "검색 설정을 고정했습니다", run: "선택 split 평가",
+    compareTitle: "같은 버전의 두 실행 비교", compareHelp: "query별 metric delta, 회귀, 누락된 관련 문서와 미평가 회수를 살펴봅니다. dataset version, index/corpus, split, cutoff가 일치해야 합니다.", runA: "첫 실행", runB: "둘째 실행", compare: "실행 비교",
+    query: "질의", queryText: "질의 문장", infoNeed: "정보 요구 그룹", relatedGroup: "관련 질의 그룹", deleteQuery: "질의 삭제", addQrel: "qrel 문서 추가", docIndex: "구체 인덱스", docId: "문서 ID", grade: "판단 grade", docFamily: "문서 계열 그룹", deleteQrel: "qrel 삭제", absentQrel: "행 없음 = unknown", explicitNull: "null · 명시적 미평가", remove: "삭제",
+    provenanceUnknown: "출처 정보 없음", provenanceLabel: "provenance", fingerprint: "Fingerprint", queries: "질의", qrels: "qrel 행", provenanceType: "판단 출처", synthetic: "synthetic · 합성 데이터", public_qrels: "public qrels · 공개 판단자료", human: "human · 사람 판단", ai_suggestion: "AI suggestion · 제안만, 정답 아님",
+    importSuccess: "가져오기 완료", importFailure: "가져오지 못했습니다", noFile: "가져올 CSV 또는 JSONL 파일을 선택하세요.", versionSaved: "새 immutable 버전을 만들었습니다.", versionFailed: "새 버전을 만들지 못했습니다", exported: "파일을 저장했습니다.", exportFailed: "내보내지 못했습니다", nameRequired: "데이터셋 이름을 입력하세요.", latestVersionOnly: "새 버전은 최신 버전을 기준으로만 만들 수 있습니다.",
+    runComplete: "평가 완료", runFailed: "평가 실패", runNotPersisted: "질의 실패가 있어 실행을 저장하지 않았습니다", safeFailure: "안전한 오류 요약이 없습니다", invalidSearchBounds: "최종 크기(1–50)는 cutoff 이상이어야 하고 후보 풀은 최종 크기 이상 200 이하여야 합니다.", compareComplete: "실행 비교 완료", compareFailed: "실행을 비교하지 못했습니다", loading: "불러오는 중…", listFailed: "데이터셋을 불러오지 못했습니다",
+    metric: "Metric", value: "값", denominator: "분모 / 설명", coverage: "Judged coverage", macro: "Macro", perQuery: "질의별 평가와 누락 문서", missed: "누락된 관련 문서", noneMissed: "판단된 관련 문서 누락 없음", retrievedUnjudged: "결과 내 미평가", absent: "qrel 행 없음", explicitNull: "명시적 null", judgedRetrieved: "수치 판단 검색 결과", unavailable: "계산 불가", regression: "회귀", improvement: "개선", unchanged: "변화 없음", delta: "변화량", failure: "실패 분류", runStored: "저장된 실행", noRuns: "현재 세션에 비교할 실행이 없습니다.", testFreeze: "test split은 설정 고정 확인 후 평가할 수 있습니다.", emptyQueries: "질의를 추가하세요.", invalidCutoff: "cutoff는 1–50 정수여야 합니다.", completeOnly: "미평가를 0으로 계산하려면 qrels 완전성을 확인하세요.", noRunSelection: "비교할 서로 다른 두 실행을 선택하세요.", noExportVersion: "내보낼 데이터셋 버전을 선택하세요.",
+  },
+  en: {
+    title: "Account-scoped evaluation datasets", intro: "Reproduce evaluations with versioned queries and relevance judgments. Existing Q01–Q10 remain separate regression fixtures.", refresh: "Refresh datasets", createDataset: "New dataset",
+    boundary: "Manage evaluation material and calculation evidence here; this view does not establish search quality. Keep data source and judgment provenance distinct. AI suggestions are never ground truth by default.",
+    importTitle: "Import query/qrels CSV or JSONL", importHelp: "An exported dataset envelope preserves dataset/version identity. Plain CSV/JSONL must include required metadata and provenance.", file: "Dataset file", format: "File format", import: "Import dataset", dataset: "Dataset", version: "Immutable version", exportFormat: "Export format", export: "Export version",
+    provenanceTitle: "Source and judgment provenance", name: "Dataset name", sourceName: "Source name", sourceUri: "Source URI", license: "License / terms", permission: "Permission status", collectedAt: "Collection date", subsetRules: "Extraction / subset rules", omittedRelevant: "Known omitted relevant items", judgmentSource: "Judgment source", assessor: "Assessor / provenance notes",
+    editorTitle: "Edit queries and qrels", editorHelp: "A new immutable version can be created only from the latest version. Older versions remain available to inspect and export. Information-need groups must stay in one split; matching groups/document families across splits are rejected. Queries conflict on normalized match or character-trigram Jaccard ≥ 0.80.", addQuery: "Add query",
+    unjudgedPolicy: "Unjudged-document policy", qrelsComplete: "I confirm qrels are complete", unjudgedHelp: "Default: judged_only. A missing qrel row is unknown; grade=null is explicitly unjudged; grade=0 is a numeric non-relevant judgment. Confirm qrels completeness before including unjudged items as zero.", selectDataset: "Select or import an account-scoped dataset.", saveVersion: "Save edits as a new version",
+    runTitle: "Evaluate selected version", runHelp: "Runs record version fingerprint, split, cutoff, index/corpus identity, and search settings. Evaluate test only after configuration is fixed.", split: "Split", mode: "Search mode", cutoff: "Cutoff", configFrozen: "Search configuration is fixed", run: "Evaluate selected split",
+    compareTitle: "Compare two runs on the same version", compareHelp: "Review per-query metric deltas/regressions, missed relevant documents, and retrieved-unjudged counts. Dataset version, index/corpus, split, and cutoff must match.", runA: "First run", runB: "Second run", compare: "Compare runs",
+    query: "Query", queryText: "Query text", infoNeed: "Information-need group", relatedGroup: "Related-query group", deleteQuery: "Remove query", addQrel: "Add qrel document", docIndex: "Concrete index", docId: "Document ID", grade: "Judgment grade", docFamily: "Document-family group", deleteQrel: "Remove qrel", absentQrel: "No row = unknown", explicitNull: "null · explicitly unjudged", remove: "Remove",
+    provenanceUnknown: "No provenance recorded", provenanceLabel: "Provenance", fingerprint: "Fingerprint", queries: "Queries", qrels: "Qrel rows", provenanceType: "Judgment source", synthetic: "synthetic · generated data", public_qrels: "public qrels · sourced judgments", human: "human · human judgment", ai_suggestion: "AI suggestion · not ground truth",
+    importSuccess: "Import complete", importFailure: "Import failed", noFile: "Choose a CSV or JSONL file to import.", versionSaved: "Created a new immutable version.", versionFailed: "Could not create version", exported: "File saved.", exportFailed: "Export failed", nameRequired: "Enter a dataset name.", latestVersionOnly: "A new version can only be created from the latest version.",
+    runComplete: "Evaluation complete", runFailed: "Evaluation failed", runNotPersisted: "The run was not saved because one or more queries failed", safeFailure: "No safe error summary was provided", invalidSearchBounds: "Final size (1–50) must be at least the cutoff; candidate pool must be at least final size and no more than 200.", compareComplete: "Run comparison complete", compareFailed: "Could not compare runs", loading: "Loading…", listFailed: "Could not load datasets",
+    metric: "Metric", value: "Value", denominator: "Denominator / notes", coverage: "Judged coverage", macro: "Macro", perQuery: "Per-query metrics and misses", missed: "Missed known-relevant documents", noneMissed: "No judged relevant documents were missed", retrievedUnjudged: "Retrieved unjudged", absent: "Missing qrel rows", explicitNull: "Explicit null", judgedRetrieved: "Numerically judged retrieved", unavailable: "Unavailable", regression: "Regression", improvement: "Improved", unchanged: "No change", delta: "Delta", failure: "Failure category", runStored: "Stored run", noRuns: "No comparable runs in this session.", testFreeze: "Evaluate the test split only after confirming the configuration is fixed.", emptyQueries: "Add at least one query.", invalidCutoff: "Cutoff must be an integer from 1 to 50.", completeOnly: "Confirm qrels completeness to count unjudged as zero.", noRunSelection: "Choose two different runs to compare.", noExportVersion: "Choose a dataset version to export.",
+  },
+};
+
+function r08Copy(key) { return R08_COPY[state.locale]?.[key] || R08_COPY.ko[key] || key; }
+function applyR08Locale() {
+  $$("[data-r08-i18n]").forEach((node) => { node.textContent = r08Copy(node.dataset.r08I18n); });
+  $("#evaluation-unjudged-policy")?.querySelector('option[value="judged_only"]') && ($("#evaluation-unjudged-policy").querySelector('option[value="judged_only"]').textContent = state.locale === "en" ? "judged_only · numeric judgments only" : "judged_only · 수치 판단 문서만 점수 계산");
+  $("#evaluation-unjudged-policy")?.querySelector('option[value="unjudged_as_nonrelevant"]') && ($("#evaluation-unjudged-policy").querySelector('option[value="unjudged_as_nonrelevant"]').textContent = state.locale === "en" ? "unjudged_as_nonrelevant · include as zero" : "unjudged_as_nonrelevant · 미평가를 0으로 포함");
+  const types = { synthetic: r08Copy("synthetic"), public_qrels: r08Copy("public_qrels"), human: r08Copy("human"), ai_suggestion: r08Copy("ai_suggestion") };
+  const select = $("#evaluation-judgment-source");
+  if (select) [...select.options].forEach((option) => { if (types[option.value]) option.textContent = types[option.value]; });
+}
+
 function sampleTargetKey(endpoint, index) {
   return JSON.stringify([safeEndpoint(endpoint), String(index || "").trim()]);
 }
@@ -214,6 +262,7 @@ function applyLocale(locale) {
   $("#ui-language").value = state.locale;
   renderRerankerStatus();
   $$('[data-i18n]').forEach(node => { const value = copy(node.dataset.i18n); if (value) node.textContent = value; });
+  applyR08Locale();
   $("#es-url").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch endpoint URL" : "Elasticsearch endpoint 주소");
   $("#index-name").setAttribute("aria-label", state.locale === "en" ? "Elasticsearch index name" : "Elasticsearch 인덱스 이름");
   const sharedProfileLabel = document.querySelector('label[for="embedding-profile-select"]');
@@ -463,6 +512,8 @@ function setConnected(enabled) {
   if (!enabled) clearVectorCandidatePool("Elasticsearch 연결이 끊겨 후보 목록을 지웠습니다. 다시 연결하고 BM25 비교부터 실행하세요.");
   $("#search-button").disabled = !enabled;
   $("#evaluate-button").disabled = !enabled;
+  const datasetRunButton = $("#evaluation-dataset-run");
+  if (datasetRunButton) datasetRunButton.disabled = !enabled || !$("#evaluation-dataset-version")?.value;
   $("#tune-button").disabled = !enabled;
   $("#load-sample-button").disabled = !enabled || !state.canImportSample;
   const selectedDimensions = Number(selectedEmbeddingProfile()?.dimensions || 1024);
@@ -4760,6 +4811,568 @@ async function exportConceptProfile() {
   } catch (error) { $("#profile-version-status").textContent = `파일을 만들지 못했습니다: ${error.message}`; }
 }
 
+function r08Element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = String(text);
+  return node;
+}
+
+function r08Input(labelKey, value, field, type = "text") {
+  const wrap = r08Element("label", "dataset-edit-field");
+  wrap.append(r08Element("span", "", r08Copy(labelKey)));
+  const input = document.createElement(type === "textarea" ? "textarea" : "input");
+  input.className = "text-input";
+  if (type !== "textarea") input.type = type;
+  input.value = value == null ? "" : String(value);
+  input.dataset.field = field;
+  wrap.append(input);
+  return wrap;
+}
+
+function r08Select(labelKey, value, field, choices) {
+  const wrap = r08Element("label", "dataset-edit-field");
+  wrap.append(r08Element("span", "", r08Copy(labelKey)));
+  const select = document.createElement("select");
+  select.className = "text-input";
+  select.dataset.field = field;
+  for (const [choiceValue, choiceLabel] of choices) {
+    const option = document.createElement("option");
+    option.value = String(choiceValue);
+    option.textContent = choiceLabel;
+    option.selected = String(value) === String(choiceValue);
+    select.append(option);
+  }
+  wrap.append(select);
+  return wrap;
+}
+
+function r08Status(selector, message, error = false) {
+  const node = $(selector);
+  node.textContent = message || "";
+  node.classList.toggle("error", error);
+  node.classList.toggle("success", !error && Boolean(message));
+}
+
+function normalizeR08Detail(result) {
+  const dataset = result.dataset || {};
+  const version = result.version || result.dataset_version || {};
+  return {
+    dataset,
+    version,
+    queries: result.queries || version.queries || [],
+    qrels: result.qrels || version.qrels || [],
+    provenance: result.provenance || version.provenance || dataset.provenance || {},
+  };
+}
+
+async function loadEvaluationDatasets(selectDatasetId = "", selectVersionId = "") {
+  try {
+    const result = await api("/api/evaluation/datasets/list", selectDatasetId ? { dataset_id: selectDatasetId } : {});
+    state.evaluationDatasets = Array.isArray(result.datasets) ? result.datasets : [];
+    const select = $("#evaluation-dataset-select");
+    const previous = selectDatasetId || select.value || state.evaluationDatasets[0]?.dataset_id || "";
+    select.replaceChildren(new Option(r08Copy("dataset"), ""));
+    for (const dataset of state.evaluationDatasets) {
+      const option = new Option(dataset.name || dataset.dataset_id, String(dataset.dataset_id));
+      select.append(option);
+    }
+    select.value = state.evaluationDatasets.some((dataset) => String(dataset.dataset_id) === String(previous)) ? String(previous) : "";
+    renderEvaluationDatasetVersions(selectVersionId);
+    if (select.value) await loadEvaluationDatasetVersion(select.value, selectVersionId || $("#evaluation-dataset-version").value);
+    else clearEvaluationDataset();
+    return state.evaluationDatasets;
+  } catch (error) {
+    r08Status("#evaluation-dataset-import-status", r08Copy("listFailed") + ": " + error.message, true);
+    return [];
+  }
+}
+
+function renderEvaluationDatasetVersions(preferredVersionId = "") {
+  const dataset = state.evaluationDatasets.find((item) => String(item.dataset_id) === $("#evaluation-dataset-select").value);
+  const select = $("#evaluation-dataset-version");
+  select.replaceChildren(new Option(r08Copy("version"), ""));
+  for (const version of dataset?.versions || []) {
+    const label = "v" + String(version.version_number ?? "?") + " · " + String(version.fingerprint || "") + " · " + String(version.created_at || "");
+    select.append(new Option(label, String(version.version_id)));
+  }
+  const versions = dataset?.versions || [];
+  const wanted = preferredVersionId || versions[0]?.version_id || "";
+  select.value = versions.some((item) => String(item.version_id) === String(wanted)) ? String(wanted) : "";
+  select.disabled = !versions.length;
+  const selectedIsLatest = versions.length > 0 && String(select.value) === String(versions[0].version_id);
+  $("#evaluation-dataset-export").disabled = !select.value;
+  $("#evaluation-dataset-add-query").disabled = !select.value;
+  $("#evaluation-dataset-save-version").disabled = !select.value || !selectedIsLatest;
+  $("#evaluation-dataset-run").disabled = !select.value || !state.connected;
+}
+
+function clearEvaluationDataset() {
+  state.evaluationDataset = null;
+  state.evaluationVersion = null;
+  state.evaluationDatasetDraft = null;
+  $("#evaluation-dataset-version").replaceChildren(new Option(r08Copy("version"), ""));
+  $("#evaluation-dataset-version").disabled = true;
+  $("#evaluation-dataset-export").disabled = true;
+  $("#evaluation-dataset-add-query").disabled = true;
+  $("#evaluation-dataset-save-version").disabled = true;
+  $("#evaluation-dataset-run").disabled = true;
+  $("#evaluation-dataset-provenance").replaceChildren();
+  $("#evaluation-dataset-editor").replaceChildren(r08Element("p", "muted", r08Copy("selectDataset")));
+}
+
+async function loadEvaluationDatasetVersion(datasetId, versionId) {
+  if (!datasetId || !versionId) return clearEvaluationDataset();
+  try {
+    const result = await api("/api/evaluation/datasets/detail", { dataset_id: datasetId, version_id: versionId });
+    const normalized = normalizeR08Detail(result);
+    state.evaluationDataset = normalized.dataset;
+    state.evaluationVersion = normalized.version;
+    state.evaluationDatasetDraft = {
+      name: normalized.dataset.name || normalized.version.name || "",
+      provenance: { ...normalized.provenance },
+      unjudged_policy: normalized.version.unjudged_policy || "judged_only",
+      qrels_complete: Boolean(normalized.version.qrels_complete),
+      queries: normalized.queries.map((query) => ({ ...query })),
+      qrels: normalized.qrels.map((qrel) => ({ ...qrel })),
+    };
+    $("#evaluation-dataset-name").value = state.evaluationDatasetDraft.name;
+    $("#evaluation-dataset-name").disabled = true;
+    $("#evaluation-source-name").value = normalized.provenance.source_name || normalized.provenance.source || "";
+    $("#evaluation-source-uri").value = normalized.provenance.source_uri || "";
+    $("#evaluation-license").value = normalized.provenance.source_license || normalized.provenance.license || normalized.provenance.license_status || "";
+    $("#evaluation-permission").value = normalized.provenance.permission_status || normalized.provenance.permission || "";
+    $("#evaluation-collected-at").value = String(normalized.provenance.collection_date || "").slice(0, 10);
+    $("#evaluation-subset-rules").value = normalized.provenance.extraction_rules || normalized.provenance.subset_rules || "";
+    $("#evaluation-omitted-relevant").value = normalized.provenance.omitted_known_relevant_items || normalized.provenance.omitted_known_relevant || "";
+    $("#evaluation-judgment-source").value = normalized.provenance.judgment_source || "human";
+    $("#evaluation-assessor").value = normalized.provenance.assessor || normalized.provenance.notes || "";
+    $("#evaluation-unjudged-policy").value = state.evaluationDatasetDraft.unjudged_policy;
+    $("#evaluation-qrels-complete").checked = state.evaluationDatasetDraft.qrels_complete;
+    $("#evaluation-dataset-version").value = String(versionId);
+    $("#evaluation-dataset-export").disabled = false;
+    $("#evaluation-dataset-add-query").disabled = false;
+    const listedDataset = state.evaluationDatasets.find((item) => String(item.dataset_id) === String(datasetId));
+    const latestVersionId = listedDataset?.versions?.[0]?.version_id;
+    $("#evaluation-dataset-save-version").disabled = latestVersionId == null || String(versionId) !== String(latestVersionId);
+    $("#evaluation-dataset-run").disabled = !state.connected;
+    renderEvaluationDatasetProvenance(normalized.dataset, normalized.version, normalized.provenance, normalized.queries, normalized.qrels);
+    renderEvaluationDatasetEditor();
+    await loadEvaluationRuns(datasetId, versionId);
+    return result;
+  } catch (error) {
+    r08Status("#evaluation-dataset-edit-status", r08Copy("listFailed") + ": " + error.message, true);
+    return null;
+  }
+}
+
+function renderEvaluationDatasetProvenance(dataset, version, provenance, queries, qrels) {
+  const host = $("#evaluation-dataset-provenance");
+  host.replaceChildren();
+  const card = r08Element("div", "dataset-provenance-card");
+  const sourceLabel = r08Copy(provenance.judgment_source || "provenanceUnknown");
+  card.append(r08Element("strong", "", String(dataset.name || version.name || r08Copy("provenanceUnknown"))));
+  card.append(r08Element("span", "dataset-provenance-chip", sourceLabel));
+  const details = [
+    [r08Copy("version"), "v" + String(version.version_number ?? "—") + " · " + String(version.version_id || "—")],
+    [r08Copy("fingerprint"), version.fingerprint || dataset.fingerprint || "—"],
+    [r08Copy("queries"), queries.length],
+    [r08Copy("qrels"), qrels.length],
+    [r08Copy("unjudgedPolicy"), version.unjudged_policy || "judged_only"],
+    [r08Copy("sourceName"), provenance.source_name || provenance.source || "—"],
+    [r08Copy("sourceUri"), provenance.source_uri || "—"],
+    [r08Copy("license"), provenance.source_license || provenance.license || provenance.license_status || "—"],
+    [r08Copy("permission"), provenance.permission_status || provenance.permission || "—"],
+    [r08Copy("collectedAt"), provenance.collection_date || "—"],
+    [r08Copy("subsetRules"), provenance.extraction_rules || provenance.subset_rules || "—"],
+    [r08Copy("omittedRelevant"), provenance.omitted_known_relevant_items || provenance.omitted_known_relevant || "—"],
+    [r08Copy("assessor"), provenance.assessor || provenance.notes || "—"],
+  ];
+  const list = document.createElement("dl");
+  for (const [label, value] of details) {
+    list.append(r08Element("dt", "", label), r08Element("dd", "", value));
+  }
+  card.append(list);
+  host.append(card);
+}
+
+function renderEvaluationDatasetEditor() {
+  const host = $("#evaluation-dataset-editor");
+  host.replaceChildren();
+  const draft = state.evaluationDatasetDraft;
+  if (!draft) { host.append(r08Element("p", "muted", r08Copy("selectDataset"))); return; }
+  if (!draft.queries.length) { host.append(r08Element("p", "muted", r08Copy("emptyQueries"))); return; }
+  draft.queries.forEach((query, queryIndex) => {
+    const card = r08Element("article", "dataset-query-card");
+    card.dataset.queryIndex = String(queryIndex);
+    const title = r08Element("div", "dataset-query-heading");
+    title.append(r08Element("strong", "", String(query.query_id || r08Copy("query") + " " + (queryIndex + 1))));
+    const remove = r08Element("button", "button button-secondary button-small", r08Copy("deleteQuery"));
+    remove.type = "button"; remove.dataset.removeQuery = String(queryIndex);
+    title.append(remove);
+    card.append(title);
+    const fields = r08Element("div", "dataset-query-fields");
+    fields.append(r08Input("queryText", query.query, "query", "textarea"));
+    fields.append(r08Select("split", query.split || "train", "split", [["train", "train"], ["validation", "validation"], ["test", "test"]]));
+    fields.append(r08Input("infoNeed", query.information_need || "", "information_need"));
+    fields.append(r08Input("relatedGroup", query.related_query_group || "", "related_query_group"));
+    card.append(fields);
+    const qrelHeader = r08Element("div", "dataset-qrels-heading");
+    qrelHeader.append(r08Element("strong", "", r08Copy("qrels")));
+    const addQrel = r08Element("button", "button button-secondary button-small", r08Copy("addQrel"));
+    addQrel.type = "button"; addQrel.dataset.addQrel = String(queryIndex);
+    qrelHeader.append(addQrel);
+    card.append(qrelHeader);
+    const qrels = draft.qrels.map((qrel, qrelIndex) => ({ qrel, qrelIndex })).filter(({ qrel }) => String(qrel.query_id) === String(query.query_id));
+    if (!qrels.length) card.append(r08Element("p", "dataset-absent-qrel", r08Copy("absentQrel")));
+    for (const { qrel, qrelIndex } of qrels) {
+      const row = r08Element("div", "dataset-qrel-row");
+      row.dataset.qrelIndex = String(qrelIndex);
+      row.append(r08Input("docIndex", qrel.document_index, "document_index"));
+      row.append(r08Input("docId", qrel.document_id, "document_id"));
+      row.append(r08Select("grade", qrel.grade == null ? "null" : qrel.grade, "grade", [["null", r08Copy("explicitNull")], ["0", "0 · " + (state.locale === "en" ? "not relevant" : "무관")], ["1", "1"], ["2", "2"], ["3", "3"]]));
+      row.append(r08Input("docFamily", qrel.document_family_id || "", "document_family_id"));
+      const del = r08Element("button", "button button-secondary button-small", r08Copy("deleteQrel"));
+      del.type = "button"; del.dataset.removeQrel = String(qrelIndex);
+      row.append(del);
+      card.append(row);
+    }
+    host.append(card);
+  });
+}
+
+function updateR08DraftFromField(event) {
+  const queryCard = event.target.closest(".dataset-query-card");
+  if (queryCard && event.target.dataset.field) {
+    const field = event.target.dataset.field;
+    if (event.target.closest(".dataset-qrel-row")) {
+      const qrel = state.evaluationDatasetDraft?.qrels[Number(event.target.closest(".dataset-qrel-row").dataset.qrelIndex)];
+      if (!qrel) return;
+      if (field === "grade") qrel.grade = event.target.value === "null" ? null : Number(event.target.value);
+      else qrel[field] = event.target.value;
+    } else {
+      const query = state.evaluationDatasetDraft?.queries[Number(queryCard.dataset.queryIndex)];
+      if (!query) return;
+      query[field] = event.target.value;
+    }
+    return;
+  }
+  if (!state.evaluationDatasetDraft) return;
+  const provenance = state.evaluationDatasetDraft.provenance;
+  const mapping = {
+    "#evaluation-dataset-name": ["name", state.evaluationDatasetDraft],
+    "#evaluation-source-name": ["source_name", provenance],
+    "#evaluation-source-uri": ["source_uri", provenance],
+    "#evaluation-license": ["source_license", provenance],
+    "#evaluation-permission": ["permission_status", provenance],
+    "#evaluation-collected-at": ["collection_date", provenance],
+    "#evaluation-subset-rules": ["extraction_rules", provenance],
+    "#evaluation-omitted-relevant": ["omitted_known_relevant_items", provenance],
+    "#evaluation-judgment-source": ["judgment_source", provenance],
+    "#evaluation-assessor": ["assessor", provenance],
+    "#evaluation-unjudged-policy": ["unjudged_policy", state.evaluationDatasetDraft],
+  };
+  const target = Object.entries(mapping).find(([selector]) => $(selector) === event.target);
+  if (target) target[1][1][target[1][0]] = event.target.value;
+  if (event.target.id === "evaluation-qrels-complete") state.evaluationDatasetDraft.qrels_complete = event.target.checked;
+}
+
+async function importEvaluationDataset() {
+  const file = $("#evaluation-dataset-file").files?.[0];
+  if (!file) return r08Status("#evaluation-dataset-import-status", r08Copy("noFile"), true);
+  const format = $("#evaluation-dataset-format").value;
+  try {
+    r08Status("#evaluation-dataset-import-status", r08Copy("loading"));
+    const result = await api("/api/evaluation/datasets/import", { format, content: await file.text() });
+    const datasetId = result.dataset?.dataset_id || result.dataset_id;
+    const versionId = result.version?.version_id || result.dataset_version?.version_id || result.version_id;
+    r08Status("#evaluation-dataset-import-status", r08Copy("importSuccess") + " · " + String(result.fingerprint || result.version?.fingerprint || ""));
+    await loadEvaluationDatasets(datasetId, versionId);
+  } catch (error) { r08Status("#evaluation-dataset-import-status", r08Copy("importFailure") + ": " + error.message, true); }
+}
+
+async function exportEvaluationDataset() {
+  const datasetId = $("#evaluation-dataset-select").value;
+  const versionId = $("#evaluation-dataset-version").value;
+  if (!datasetId || !versionId) return r08Status("#evaluation-dataset-edit-status", r08Copy("noExportVersion"), true);
+  try {
+    const result = await api("/api/evaluation/datasets/export", { dataset_id: datasetId, version_id: versionId, format: $("#evaluation-dataset-export-format").value });
+    downloadText(result.content || "", result.filename || ("evaluation-dataset." + result.format));
+    r08Status("#evaluation-dataset-edit-status", r08Copy("exported"));
+  } catch (error) { r08Status("#evaluation-dataset-edit-status", r08Copy("exportFailed") + ": " + error.message, true); }
+}
+
+async function saveEvaluationDatasetVersion() {
+  const draft = state.evaluationDatasetDraft;
+  if (!draft) return;
+  if (!draft.queries.length) return r08Status("#evaluation-dataset-edit-status", r08Copy("emptyQueries"), true);
+  if (draft.unjudged_policy === "unjudged_as_nonrelevant" && !$("#evaluation-qrels-complete").checked) return r08Status("#evaluation-dataset-edit-status", r08Copy("completeOnly"), true);
+  const payload = {
+    name: $("#evaluation-dataset-name").value.trim(),
+    provenance: { ...draft.provenance, judgment_source: $("#evaluation-judgment-source").value, assessor: $("#evaluation-assessor").value.trim() },
+    unjudged_policy: $("#evaluation-unjudged-policy").value,
+    qrels_complete: $("#evaluation-qrels-complete").checked,
+    queries: draft.queries.map((query) => ({ query_id: query.query_id, query: query.query || "", split: query.split || "train", information_need: query.information_need || "", related_query_group: query.related_query_group || "" })),
+    qrels: draft.qrels.map((qrel) => ({ query_id: qrel.query_id, document_index: qrel.document_index || "", document_id: qrel.document_id || "", grade: qrel.grade == null ? null : Number(qrel.grade), document_family_id: qrel.document_family_id || "" })),
+  };
+  try {
+    const isNew = !state.evaluationDataset || !state.evaluationVersion;
+    if (!payload.name) return r08Status("#evaluation-dataset-edit-status", r08Copy("nameRequired"), true);
+    if (!isNew) {
+      const listedDataset = state.evaluationDatasets.find((item) => String(item.dataset_id) === String(state.evaluationDataset.dataset_id));
+      if (String($("#evaluation-dataset-version").value) !== String(listedDataset?.versions?.[0]?.version_id)) {
+        return r08Status("#evaluation-dataset-edit-status", r08Copy("latestVersionOnly"), true);
+      }
+    }
+    const endpoint = isNew ? "/api/evaluation/datasets/create" : "/api/evaluation/datasets/versions/create";
+    if (!isNew) {
+      payload.dataset_id = state.evaluationDataset.dataset_id;
+      payload.base_version_id = state.evaluationVersion.version_id;
+    }
+    const result = await api(endpoint, payload);
+    const version = result.version || result.dataset_version || result;
+    r08Status("#evaluation-dataset-edit-status", r08Copy("versionSaved") + " · " + String(version.fingerprint || result.fingerprint || ""));
+    await loadEvaluationDatasets(result.dataset_id || payload.dataset_id, version.version_id);
+  } catch (error) { r08Status("#evaluation-dataset-edit-status", r08Copy("versionFailed") + ": " + error.message, true); }
+}
+
+async function loadEvaluationRuns(datasetId, versionId) {
+  try {
+    const result = await api("/api/evaluation/runs/list", { dataset_id: datasetId, version_id: versionId });
+    state.evaluationRuns = result.runs || [];
+    setRunChoices();
+  } catch { state.evaluationRuns = []; setRunChoices(); }
+}
+
+function startEvaluationDatasetDraft() {
+  state.evaluationDataset = null;
+  state.evaluationVersion = null;
+  state.evaluationDatasetDraft = {
+    name: "", provenance: { judgment_source: "human" }, unjudged_policy: "judged_only",
+    qrels_complete: false, queries: [], qrels: [],
+  };
+  $("#evaluation-dataset-select").value = "";
+  $("#evaluation-dataset-version").replaceChildren(new Option(r08Copy("version"), ""));
+  $("#evaluation-dataset-name").value = "";
+  $("#evaluation-dataset-name").disabled = false;
+  ["#evaluation-source-name", "#evaluation-source-uri", "#evaluation-license", "#evaluation-permission", "#evaluation-collected-at", "#evaluation-subset-rules", "#evaluation-omitted-relevant", "#evaluation-assessor"].forEach((selector) => { $(selector).value = ""; });
+  $("#evaluation-judgment-source").value = "human";
+  $("#evaluation-unjudged-policy").value = "judged_only";
+  $("#evaluation-qrels-complete").checked = false;
+  $("#evaluation-dataset-export").disabled = true;
+  $("#evaluation-dataset-add-query").disabled = false;
+  $("#evaluation-dataset-save-version").disabled = false;
+  $("#evaluation-dataset-run").disabled = true;
+  $("#evaluation-dataset-provenance").replaceChildren();
+  renderEvaluationDatasetEditor();
+  addEvaluationQuery();
+  $("#evaluation-dataset-name").focus();
+}
+
+function addEvaluationQuery() {
+  if (!state.evaluationDatasetDraft) return;
+  const queryId = "q-" + (globalThis.crypto?.randomUUID?.() || Date.now() + "-" + Math.random().toString(16).slice(2));
+  state.evaluationDatasetDraft.queries.push({ query_id: queryId, query: "", split: "train", information_need: "", related_query_group: "" });
+  renderEvaluationDatasetEditor();
+  $("#evaluation-dataset-editor .dataset-query-card:last-child textarea")?.focus();
+}
+
+function addEvaluationQrel(queryIndex) {
+  const query = state.evaluationDatasetDraft?.queries[queryIndex];
+  if (!query) return;
+  state.evaluationDatasetDraft.qrels.push({ query_id: query.query_id, document_index: $("#index-name").value.trim(), document_id: "", grade: null, document_family_id: "" });
+  renderEvaluationDatasetEditor();
+}
+
+function handleEvaluationDatasetEditorClick(event) {
+  const draft = state.evaluationDatasetDraft;
+  if (!draft) return;
+  const removeQuery = event.target.closest("[data-remove-query]");
+  if (removeQuery) {
+    const query = draft.queries.splice(Number(removeQuery.dataset.removeQuery), 1)[0];
+    if (query) draft.qrels = draft.qrels.filter((qrel) => String(qrel.query_id) !== String(query.query_id));
+    renderEvaluationDatasetEditor();
+    return;
+  }
+  const removeQrel = event.target.closest("[data-remove-qrel]");
+  if (removeQrel) {
+    draft.qrels.splice(Number(removeQrel.dataset.removeQrel), 1);
+    renderEvaluationDatasetEditor();
+    return;
+  }
+  const addQrelButton = event.target.closest("[data-add-qrel]");
+  if (addQrelButton) addEvaluationQrel(Number(addQrelButton.dataset.addQrel));
+}
+
+function setRunChoices() {
+  const left = $("#evaluation-run-left"), right = $("#evaluation-run-right");
+  const choice = (run) => (String(run.run_id || "—") + " · " + String(run.split || "—") + " · " + String(run.mode || "—") + " @ " + String(run.cutoff ?? "—"));
+  for (const select of [left, right]) {
+    const previous = select.value;
+    select.replaceChildren(new Option(r08Copy("runStored"), ""));
+    for (const run of state.evaluationRuns) select.append(new Option(choice(run), String(run.run_id || "")));
+    if (state.evaluationRuns.some((run) => String(run.run_id) === previous)) select.value = previous;
+    select.disabled = state.evaluationRuns.length < 2;
+  }
+  $("#evaluation-run-compare").disabled = state.evaluationRuns.length < 2;
+}
+
+function metricLabel(key) {
+  return ({ precision_at_k: "Precision@k", recall_at_k: "Recall@k", mrr_at_k: "MRR@k", ndcg_at_k: "nDCG@k", judged_coverage_at_k: r08Copy("coverage") })[key] || key;
+}
+
+function renderR08MetricTable(metrics, cutoff) {
+  const table = document.createElement("table");
+  table.className = "evaluation-dataset-metrics";
+  const thead = document.createElement("thead"), head = document.createElement("tr");
+  for (const label of [r08Copy("metric"), r08Copy("value"), r08Copy("denominator")]) head.append(r08Element("th", "", label));
+  thead.append(head); table.append(thead);
+  const tbody = document.createElement("tbody");
+  for (const key of ["precision_at_k", "recall_at_k", "mrr_at_k", "ndcg_at_k", "judged_coverage_at_k"]) {
+    const row = document.createElement("tr");
+    const metric = metrics[key];
+    const value = metric && typeof metric === "object" ? metric.mean : metric;
+    row.append(r08Element("th", "", metricLabel(key)));
+    row.append(r08Element("td", "", value == null ? r08Copy("unavailable") : formatNumber(value)));
+    const unavailable = metrics.unavailable_reasons?.[key];
+    const denominator = metric && typeof metric === "object" ? "n=" + String(metric.query_count ?? "—") : metrics.denominators?.[key];
+    row.append(r08Element("td", "", unavailable || ("k=" + String(metrics.cutoff ?? cutoff ?? "—") + " · " + String(denominator ?? "—"))));
+    tbody.append(row);
+  }
+  table.append(tbody);
+  return table;
+}
+
+function renderEvaluationDatasetRunResult(result) {
+  const run = result.run || result;
+  const metrics = run.aggregate || run.metrics || result.aggregate || result.metrics || {};
+  const queries = run.queries || result.queries || result.per_query || run.per_query || [];
+  const counts = run.counts || metrics.counts || {};
+  const host = $("#evaluation-dataset-run-results");
+  host.replaceChildren();
+  const section = r08Element("section", "dataset-run-result");
+  section.append(r08Element("h4", "", r08Copy("runComplete") + " · " + String(run.run_id || "—")));
+  const provenance = run.dataset_provenance || run.provenance || {};
+  const provenanceText = [run.dataset_id, run.dataset_version_id || run.version_id, run.dataset_version_number ? "v" + run.dataset_version_number : "", run.fingerprint || run.dataset_fingerprint, run.split, run.index || run.corpus_identity, "k=" + String(run.cutoff ?? $("#evaluation-cutoff").value), run.unjudged_policy || provenance.unjudged_policy, provenance.judgment_source].filter((item) => item != null && item !== "").join(" · ");
+  section.append(r08Element("p", "dataset-run-provenance", provenanceText));
+  section.append(renderR08MetricTable(metrics, run.cutoff));
+  const countLine = r08Copy("judgedRetrieved") + ": " + String(counts.numeric_judged_retrieved ?? counts.judged_retrieved ?? "—") + " · " + r08Copy("explicitNull") + ": " + String(counts.explicit_null_retrieved ?? counts.explicit_unjudged_retrieved ?? "—") + " · " + r08Copy("absent") + ": " + String(counts.absent_qrel_retrieved ?? counts.absent_retrieved ?? "—") + " · " + r08Copy("retrievedUnjudged") + ": " + String(counts.retrieved_unjudged ?? "—");
+  section.append(r08Element("p", "dataset-run-counts", countLine));
+  const perQuery = r08Element("section", "dataset-run-query-results");
+  perQuery.append(r08Element("h5", "", r08Copy("perQuery")));
+  for (const query of queries) {
+    const card = r08Element("article", "dataset-run-query");
+    card.append(r08Element("strong", "", String(query.query_id || query.query || "—") + " · " + String(query.split || run.split || "—")));
+    if (query.query) card.append(r08Element("p", "", query.query));
+    if (query.status === "failed") {
+      card.append(r08Element("p", "dataset-query-failure", (query.failure_category || r08Copy("failure")) + " · " + (query.error || r08Copy("safeFailure"))));
+      perQuery.append(card);
+      continue;
+    }
+    const qm = query.metrics || query;
+    const queryMetricValues = ["precision_at_k", "recall_at_k", "mrr_at_k", "ndcg_at_k", "judged_coverage_at_k"].map((key) => metricLabel(key) + " " + (qm[key] == null ? r08Copy("unavailable") : formatNumber(typeof qm[key] === "object" ? qm[key].value ?? qm[key].mean : qm[key]))).join(" · ");
+    card.append(r08Element("p", "dataset-run-query-metrics", queryMetricValues));
+    const qc = query.counts || {};
+    card.append(r08Element("p", "dataset-run-query-counts", r08Copy("judgedRetrieved") + ": " + String(qc.numeric_judged_retrieved ?? qc.judged_retrieved ?? "—") + " · " + r08Copy("explicitNull") + ": " + String(qc.explicit_null_retrieved ?? qc.explicit_unjudged_retrieved ?? "—") + " · " + r08Copy("absent") + ": " + String(qc.absent_qrel_retrieved ?? qc.absent_retrieved ?? "—")));
+    const misses = query.missed_known_relevant || [];
+    const missList = r08Element("ul", "dataset-missed-docs");
+    if (!misses.length) missList.append(r08Element("li", "", r08Copy("noneMissed")));
+    for (const miss of misses) missList.append(r08Element("li", "", String(miss.document_index || "—") + " / " + String(miss.document_id || "—") + " · grade " + String(miss.grade ?? "—")));
+    card.append(r08Element("strong", "", r08Copy("missed")));
+    card.append(missList);
+    for (const hit of query.ranked_hits || []) {
+      const qrelState = hit.qrel_state || (hit.grade == null ? "unknown" : "judged");
+      card.append(r08Element("small", "dataset-ranked-hit", "#" + String(hit.original_rank ?? "—") + " · judged #" + String(hit.judged_rank ?? "—") + " · " + String(hit.document_index || "—") + " / " + String(hit.document_id || "—") + " · " + String(qrelState)));
+    }
+    perQuery.append(card);
+  }
+  section.append(perQuery);
+  host.append(section);
+  if (run.run_id) {
+    state.evaluationRuns.push(run);
+    setRunChoices();
+  }
+}
+
+async function runEvaluationDataset() {
+  const datasetId = $("#evaluation-dataset-select").value;
+  const versionId = $("#evaluation-dataset-version").value;
+  const split = $("#evaluation-split").value;
+  const cutoff = Number($("#evaluation-cutoff").value);
+  if (!datasetId || !versionId) return;
+  if (!Number.isInteger(cutoff) || cutoff < 1 || cutoff > 50) return r08Status("#evaluation-dataset-run-status", r08Copy("invalidCutoff"), true);
+  const size = Number($("#search-size").value || 10);
+  const candidatePool = Number($("#candidate-pool").value || 50);
+  if (!Number.isInteger(size) || size < cutoff || size > 50 || candidatePool < size || candidatePool > 200) return r08Status("#evaluation-dataset-run-status", r08Copy("invalidSearchBounds"), true);
+  if (split === "test" && !$("#evaluation-config-frozen").checked) return r08Status("#evaluation-dataset-run-status", r08Copy("testFreeze"), true);
+  const settings = {
+    candidate_pool: candidatePool,
+    size,
+    boosts: readBoosts(),
+    rank_constant: Number($("#rank-constant").value),
+    profile_id: state.sharedProfileId,
+  };
+  try {
+    r08Status("#evaluation-dataset-run-status", r08Copy("loading"));
+    const result = await api("/api/evaluation/datasets/evaluate", requestPayload({
+      dataset_id: datasetId, version_id: versionId, split, mode: $("#evaluation-dataset-mode").value,
+      settings, cutoff, configuration_frozen: $("#evaluation-config-frozen").checked,
+    }));
+    if (result.persisted === false) {
+      const failures = (result.failures || []).map((failure) => String(failure.query_id || "—") + ": " + String(failure.failure_category || r08Copy("failure"))).join(" · ");
+      $("#evaluation-dataset-run-results").replaceChildren(r08Element("p", "dataset-run-failure", r08Copy("runNotPersisted") + " · " + (failures || r08Copy("safeFailure"))));
+      return r08Status("#evaluation-dataset-run-status", r08Copy("runNotPersisted"), true);
+    }
+    r08Status("#evaluation-dataset-run-status", r08Copy("runComplete"));
+    renderEvaluationDatasetRunResult(result);
+    await loadEvaluationRuns(datasetId, versionId);
+  } catch (error) { r08Status("#evaluation-dataset-run-status", r08Copy("runFailed") + ": " + error.message, true); }
+}
+
+function renderEvaluationRunComparison(result) {
+  const host = $("#evaluation-run-compare-results");
+  host.replaceChildren();
+  const rows = result.queries || result.per_query || result.comparison?.queries || [];
+  const summary = r08Element("p", "dataset-compare-summary", [result.dataset_id, result.version_id, result.corpus_identity || result.index, result.split, "k=" + String(result.cutoff ?? "—")].filter(Boolean).join(" · "));
+  host.append(summary);
+  for (const row of rows) {
+    const card = r08Element("article", "dataset-compare-query");
+    card.append(r08Element("strong", "", String(row.query_id || row.query || "—")));
+    if (row.query) card.append(r08Element("p", "", row.query));
+    const status = row.failure_category ? r08Copy("failure") + ": " + String(row.failure_category) : (row.regressions?.length || row.regression) ? r08Copy("regression") + (row.regressions?.length ? ": " + row.regressions.join(", ") : "") : row.improvement ? r08Copy("improvement") : r08Copy("unchanged");
+    card.append(r08Element("p", "dataset-compare-query-status", status));
+    const delta = row.metric_deltas || row.deltas || {};
+    for (const key of ["precision_at_k", "recall_at_k", "mrr_at_k", "ndcg_at_k", "judged_coverage_at_k"]) {
+      card.append(r08Element("p", "", metricLabel(key) + " · Δ " + String(delta[key] ?? "—")));
+    }
+    const missedAdded = row.missed_relevant_added || row.right_missed_known_relevant || row.missed_known_relevant || [];
+    const missedFixed = row.missed_relevant_fixed || row.left_missed_known_relevant || [];
+    for (const miss of [...missedAdded, ...missedFixed]) card.append(r08Element("small", "", r08Copy("missed") + ": " + String(miss.document_index || "—") + " / " + String(miss.document_id || "—") + " · grade " + String(miss.grade ?? "—")));
+    card.append(r08Element("p", "dataset-compare-unjudged", r08Copy("retrievedUnjudged") + ": " + String(row.left_retrieved_unjudged_count ?? "—") + " → " + String(row.right_retrieved_unjudged_count ?? "—") + " · " + r08Copy("coverage") + ": " + String(row.left_coverage ?? "—") + " → " + String(row.right_coverage ?? "—")));
+    host.append(card);
+  }
+}
+
+async function compareEvaluationRuns() {
+  const datasetId = $("#evaluation-dataset-select").value;
+  const versionId = $("#evaluation-dataset-version").value;
+  const leftRunId = $("#evaluation-run-left").value;
+  const rightRunId = $("#evaluation-run-right").value;
+  if (!leftRunId || !rightRunId || leftRunId === rightRunId) return r08Status("#evaluation-dataset-run-status", r08Copy("noRunSelection"), true);
+  try {
+    const result = await api("/api/evaluation/runs/compare", { dataset_id: datasetId, version_id: versionId, left_run_id: leftRunId, right_run_id: rightRunId });
+    renderEvaluationRunComparison(result);
+    r08Status("#evaluation-dataset-run-status", r08Copy("compareComplete"));
+  } catch (error) { r08Status("#evaluation-dataset-run-status", r08Copy("compareFailed") + ": " + error.message, true); }
+}
+
+function downloadText(contents, filename) {
+  const type = filename.endsWith(".csv") ? "text/csv;charset=utf-8" : "application/x-ndjson;charset=utf-8";
+  const url = URL.createObjectURL(new Blob([contents], { type }));
+  const link = document.createElement("a");
+  link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+}
+
 async function runEvaluation() {
   if (!state.connected) return;
   const button = $("#evaluate-button");
@@ -4911,12 +5524,16 @@ function init() {
   refreshCodebaseStatus();
   loadEmbeddingProfiles();
   loadRerankerStatus();
+  loadEvaluationDatasets();
 
   $$(".tab").forEach((tab) => tab.addEventListener("click", () => activateTab(tab.dataset.tab)));
   activateTab("concept-panel");
   bindKnowledgeControls();
   $("#ui-language").addEventListener("change", () => {
     applyLocale($("#ui-language").value);
+    if (state.evaluationDatasetDraft) renderEvaluationDatasetEditor();
+    if (state.evaluationDataset && state.evaluationVersion) renderEvaluationDatasetProvenance(state.evaluationDataset, state.evaluationVersion, state.evaluationDatasetDraft?.provenance || {}, state.evaluationDatasetDraft?.queries || [], state.evaluationDatasetDraft?.qrels || []);
+    setRunChoices();
     loadEmbeddingProfiles();
     try { localStorage.setItem("es-rag-locale", state.locale); } catch {}
   });
@@ -5032,6 +5649,27 @@ function init() {
     }
   });
   $("#evaluate-button").addEventListener("click", runEvaluation);
+  $("#evaluation-datasets-refresh").addEventListener("click", () => loadEvaluationDatasets($("#evaluation-dataset-select").value, $("#evaluation-dataset-version").value));
+  $("#evaluation-dataset-create").addEventListener("click", startEvaluationDatasetDraft);
+  $("#evaluation-dataset-select").addEventListener("change", () => {
+    const datasetId = $("#evaluation-dataset-select").value;
+    renderEvaluationDatasetVersions();
+    if (datasetId) loadEvaluationDatasetVersion(datasetId, $("#evaluation-dataset-version").value);
+    else clearEvaluationDataset();
+  });
+  $("#evaluation-dataset-version").addEventListener("change", () => loadEvaluationDatasetVersion($("#evaluation-dataset-select").value, $("#evaluation-dataset-version").value));
+  $("#evaluation-dataset-import").addEventListener("click", importEvaluationDataset);
+  $("#evaluation-dataset-export").addEventListener("click", exportEvaluationDataset);
+  $("#evaluation-dataset-add-query").addEventListener("click", addEvaluationQuery);
+  $("#evaluation-dataset-editor").addEventListener("input", updateR08DraftFromField);
+  $("#evaluation-dataset-editor").addEventListener("change", updateR08DraftFromField);
+  $("#evaluation-dataset-editor").addEventListener("click", handleEvaluationDatasetEditorClick);
+  $("#evaluation-dataset-save-version").addEventListener("click", saveEvaluationDatasetVersion);
+  ["#evaluation-dataset-name", "#evaluation-source-name", "#evaluation-source-uri", "#evaluation-license", "#evaluation-permission", "#evaluation-collected-at", "#evaluation-subset-rules", "#evaluation-omitted-relevant", "#evaluation-judgment-source", "#evaluation-assessor", "#evaluation-unjudged-policy", "#evaluation-qrels-complete"].forEach((selector) => $(selector).addEventListener("input", updateR08DraftFromField));
+  $("#evaluation-qrels-complete").addEventListener("change", updateR08DraftFromField);
+  $("#evaluation-unjudged-policy").addEventListener("change", updateR08DraftFromField);
+  $("#evaluation-dataset-run").addEventListener("click", runEvaluationDataset);
+  $("#evaluation-run-compare").addEventListener("click", compareEvaluationRuns);
   $("#tune-button").addEventListener("click", runTune);
   $("#chunk-size").addEventListener("input", renderChunkPreview);
   $("#chunk-overlap").addEventListener("input", renderChunkPreview);

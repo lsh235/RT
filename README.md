@@ -6,7 +6,7 @@ Elasticsearch에 저장된 문서를 직접 검색하고, 검색 결과와 근�
 
 ## 개발 완료 목표
 
-현재 구현 작업 기준은 **R07 / v1.12.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
+현재 구현 작업 기준은 **R08 / v1.13.0**이며, [1.5.0 기준선](docs/roadmap/oss-readiness-plan.md) 이후 공개 저장소 준비와 로컬 개인 지식 개선을 단계별로 진행 중입니다. 전체 단계와 완료 게이트는 [개선 계획](docs/roadmap/oss-readiness-plan.md) 및 [진행 기록](docs/roadmap/progress.json)에 있습니다. Cycle 45–48 기능은 아직 전체 완료로 판정하지 않았습니다. 이 계획은 로컬 앱 계정 하나가 직원 소유자 한 명에 대응하고, 앱을 loopback/local 환경에서 사용하며, 개인 지식을 공유 일반 Elasticsearch 인덱스와 분리해 취급한다는 가정에 기반합니다.
 
 ## 빠른 시작
 
@@ -88,6 +88,12 @@ docker run --name es-rag-local --detach \
 
 BM25, 벡터, RRF 하이브리드 검색은 후보 풀과 최종 Top-K를 따로 설정합니다. 결과에는 구체 인덱스/문서 ID, lane별 순위와 원점수, RRF 및 재순위화 근거가 표시됩니다. 각 점수는 보정되지 않은 진단값이며 관련도 확률이 아닙니다. 선택형 로컬 재순위화를 사용하려면 `.venv/bin/python -m pip install -e '.[reranker]'`로 추가 패키지를 설치하고, 화면에서 동의한 뒤 고정된 BAAI/bge-reranker-v2-m3 모델 파일(약 2.3 GB)을 준비합니다. 일반 검색은 이 모델을 다운로드하지 않습니다. 재순위화를 켰는데 런타임이나 캐시가 준비되지 않은 경우 요청은 명시적 오류로 끝납니다. 이 통합만으로 검색 품질 향상을 주장하지 않습니다. 자세한 내용은 [v1.12.0 acceptance](docs/acceptance/v1.12.0.md)와 [API 계약](docs/api-contract.md)을 참고하세요.
 
+### 버전 관리 평가 데이터셋
+
+R08 평가 탭은 계정별 질의와 qrel을 CSV/JSONL로 가져오고 내보내며, 새 편집은 변경 불가능한 데이터셋 버전으로 저장합니다. 각 판단은 구체적인 인덱스와 문서 ID, 출처·사용 권한 상태, 수집일, 추출 규칙, 생략된 관련 항목, 판정자 정보를 보존합니다. `train`/`validation`/`test` 분할은 같은 정보 요구, 중복·유사 질의, 문서 및 문서 가족의 교차를 검사합니다.
+
+기본 `judged_only` 지표는 수치로 기록된 판단만 평가하고, 명시적 `null` 판단과 qrel 행 자체가 없는 문서는 따로 표시합니다. 둘 다 자동으로 무관 등급 `0`이 되지 않습니다. 결과에는 Precision, Recall, MRR, nDCG, judged coverage, 분모, 누락된 관련 문서와 비교 실행의 질의별 변화가 포함됩니다. Test 분할은 설정을 고정한 뒤 데이터셋 버전과 Elasticsearch 코퍼스마다 한 번 실행할 수 있습니다. 코드를 평가할 수 있다는 사실은 검색 품질 향상 증거가 아닙니다. 이 저장소에는 권리 확인을 마친 대표 qrels를 포함하지 않으며, 포함된 제3자 샘플에 대해서도 별도 사용 허가 자료를 아직 받지 않았습니다. 범위와 수치는 [v1.13.0 R08 acceptance](docs/acceptance/v1.13.0.md)에 기록합니다.
+
 ```bash
 .venv/bin/python -m pip install -e '.[semantic]'
 ```
@@ -157,6 +163,7 @@ Elasticsearch 주소, 인덱스와 인증 정보를 브라우저에서 입력합
 | 청크 정책과 복구 가능한 재색인 | [API와 저장 계약](docs/api-contract.md), [v1.10.0 R05 acceptance](docs/acceptance/v1.10.0.md) |
 | 임베딩 프로필과 벡터 호환성 | [API와 저장 계약](docs/api-contract.md), [v1.11.0 R06 acceptance](docs/acceptance/v1.11.0.md) |
 | BM25/vector/RRF 비교, 결과 경로와 선택형 로컬 재순위화 | [API 계약](docs/api-contract.md), [v1.12.0 R07 acceptance](docs/acceptance/v1.12.0.md) |
+| 버전 관리 qrels, 판단 출처, 지표 및 분할 검증 | [API 계약](docs/api-contract.md), [v1.13.0 R08 acceptance](docs/acceptance/v1.13.0.md) |
 | 실험 비교와 내보내기 | [비교 연구](docs/experiment-comparison-research.md), [내보내기 연구](docs/experiment-export-research.md), [내보내기 acceptance](docs/experiment-export-acceptance.md) |
 
 ## 문제 해결

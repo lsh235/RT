@@ -49,7 +49,7 @@ def main() -> None:
             env=env,
             check=True,
         )
-        code = "import importlib.resources as r, es_rag_tuner; assert es_rag_tuner.__version__ == '1.12.0'; assert r.files('es_rag_tuner').joinpath('web/index.html').is_file(); print(es_rag_tuner.__version__)"
+        code = "import importlib.resources as r, es_rag_tuner; assert es_rag_tuner.__version__ == '1.13.0'; assert r.files('es_rag_tuner').joinpath('web/index.html').is_file(); print(es_rag_tuner.__version__)"
         subprocess.run([str(python), "-c", code], cwd=outside, env=env, check=True)
 
 

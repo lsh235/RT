@@ -49,7 +49,7 @@ async function main() {
       calls.push({ path: url.pathname, method: request.method(), body });
       const json = (value, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
       if (url.pathname === "/api/auth/session") return json({ configured: true, authenticated: true, csrf_token: "mock-csrf", user: { id: "mock-user", username: "mock", display_name: "Mock", role: "user" } });
-      if (url.pathname === "/api/health") return json({ version: "1.12.0" });
+      if (url.pathname === "/api/health") return json({ version: "1.13.0" });
       if (url.pathname === "/api/codebase-status") return json({ indexed: false });
       if (url.pathname === "/api/ai/status") return json({ providers: [] });
       if (url.pathname === "/api/embedding-profiles") return json({ profiles: [] });
