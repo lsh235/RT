@@ -26,6 +26,8 @@ _STATE_REQUIRED = {
     "runs": {"id", "concept_id", "created_at", "kind", "body"},
     "knowledge_documents": {"id", "title", "source_label", "content", "content_bytes", "created_at", "updated_at"},
     "knowledge_chunks": {"id", "document_id", "ordinal", "start_offset", "end_offset", "content"},
+    "knowledge_chunk_policy": {"id", "policy_json", "policy_sha256", "updated_at"},
+    "knowledge_reindex_jobs": {"id", "state", "policy_json", "policy_sha256", "created_at", "updated_at", "total_documents", "completed_documents", "failed_documents_json", "source_fingerprint", "target_generation", "safe_error", "cancel_requested"},
     "knowledge_judgments": {"concept_id", "query_id", "document_id", "query_fingerprint", "document_fingerprint", "source_label", "rating", "updated_at"},
     "knowledge_es_state": {"id", "state", "generation", "indexed_chunks", "local_fingerprint", "synced_fingerprint", "last_synced_at", "error"},
     "state_owner": {"singleton", "owner_id"},
@@ -207,7 +209,33 @@ def _state_v2(db: sqlite3.Connection) -> None:
         db.execute("UPDATE knowledge_documents SET content_sha256=? WHERE id=?", (digest, row[0]))
 
 
-_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2}, "control": {1: _control_v1}}
+def _state_v3(db: sqlite3.Connection) -> None:
+    """Add chunk policy/reindex state while preserving legacy chunk content."""
+    from .chunking import normalize_policy, policy_fingerprint
+
+    columns = _columns(db, "knowledge_chunks")
+    for name, definition in (
+        ("source_revision", "INTEGER NOT NULL DEFAULT 1"),
+        ("policy_sha256", "TEXT NOT NULL DEFAULT ''"),
+        ("token_count", "INTEGER"),
+    ):
+        if name not in columns:
+            db.execute(f"ALTER TABLE knowledge_chunks ADD COLUMN {name} {definition}")
+    db.execute(
+        "UPDATE knowledge_chunks SET source_revision=COALESCE((SELECT revision FROM knowledge_documents WHERE knowledge_documents.id=knowledge_chunks.document_id),1)"
+    )
+    db.execute("CREATE TABLE IF NOT EXISTS knowledge_chunk_policy (id INTEGER PRIMARY KEY CHECK(id=1), policy_json TEXT NOT NULL, policy_sha256 TEXT NOT NULL, updated_at TEXT NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS knowledge_reindex_jobs (id TEXT PRIMARY KEY, state TEXT NOT NULL, policy_json TEXT NOT NULL, policy_sha256 TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, total_documents INTEGER NOT NULL DEFAULT 0, completed_documents INTEGER NOT NULL DEFAULT 0, failed_documents_json TEXT NOT NULL DEFAULT '[]', source_fingerprint TEXT NOT NULL DEFAULT '', target_generation TEXT NOT NULL DEFAULT '', safe_error TEXT NOT NULL DEFAULT '', cancel_requested INTEGER NOT NULL DEFAULT 0)")
+    policy = normalize_policy({"strategy": "character", "size": 1800, "overlap": 200})
+    import json
+    policy_json = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+    db.execute(
+        "INSERT OR IGNORE INTO knowledge_chunk_policy(id,policy_json,policy_sha256,updated_at) VALUES(1,?,?,CURRENT_TIMESTAMP)",
+        (policy_json, policy_fingerprint(policy)),
+    )
+
+
+_MIGRATIONS = {"state": {1: _state_v1, 2: _state_v2, 3: _state_v3}, "control": {1: _control_v1}}
 
 
 def migrate(db: sqlite3.Connection, component: str) -> None:

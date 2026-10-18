@@ -2,6 +2,13 @@
 
 User-visible changes are recorded here. Historical notes below distinguish the release baseline from work in progress.
 
+## [1.10.0] - 2026-10-19
+
+- Add account-private character, paragraph, and pinned-token chunk policies with source offsets, source revisions, policy fingerprints, and inspectable chunk counts.
+- Add persisted reindex jobs with progress, cancellation, restart recovery, retry, and per-document failure reporting.
+- Stage and verify private Elasticsearch generations before switching an account-derived alias; failed or cancelled jobs retain the previous published generation.
+- Document the chunk preview/policy and reindex job API, migration v3 state, and their retrieval-quality evidence limits.
+
 ## [1.9.0] - 2026-10-19
 
 - Add account-local TXT, Markdown, CSV, and JSONL import with strict decoding, field mapping, row-level outcomes, duplicate actions, and source/content hashes.

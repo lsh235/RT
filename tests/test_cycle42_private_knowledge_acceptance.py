@@ -119,6 +119,15 @@ class FakeElasticsearch(BaseHTTPRequestHandler):
             if type(self).on_refresh:
                 type(self).on_refresh()
             return self._send(200, {"_shards": {"successful": 1, "failed": 0}})
+        if self.command == "POST" and path.endswith("/_mget"):
+            target = path.rsplit("/", 1)[0]
+            docs = type(self).indexes.get(target, {}).get("documents", {})
+            requested = (body or {}).get("docs", [])
+            return self._send(200, {"docs": [
+                {"_id": item.get("_id"), "found": item.get("_id") in docs,
+                 **({"_source": docs[item.get("_id")]} if item.get("_id") in docs else {})}
+                for item in requested
+            ]})
         if self.command == "POST" and path.endswith("/_search"):
             target = path.rsplit("/", 1)[0]
             concrete = type(self).aliases.get(target, target)

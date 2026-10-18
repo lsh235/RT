@@ -19,7 +19,7 @@ from urllib.parse import quote
 
 from . import concepts
 from . import storage
-from . import embeddings, token_preview
+from . import embeddings, token_preview, chunking
 from .es_client import Connection, ElasticsearchError, private_alias, private_read_scope, private_sync_scope, request, validate_index
 
 MAX_DOCUMENT_BYTES = 1024 * 1024
@@ -90,17 +90,32 @@ def _content_bytes(content: Any) -> tuple[str, int]:
     return content, size
 
 
-def _split(content: str) -> list[dict[str, Any]]:
-    """Split by code points with deterministic full coverage and fixed overlap."""
-    chunks = []
-    start = 0
-    while start < len(content):
-        end = min(start + CHUNK_CODEPOINTS, len(content))
-        chunks.append({"ordinal": len(chunks), "start": start, "end": end, "content": content[start:end]})
-        if end == len(content):
-            break
-        start = end - CHUNK_OVERLAP
-    return chunks
+def _split(content: str, policy: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    selected = policy or chunking.normalize_policy({"strategy": "character", "size": CHUNK_CODEPOINTS, "overlap": CHUNK_OVERLAP})
+    return [{"ordinal": item["ordinal"], "start": item["start_offset"], "end": item["end_offset"],
+             "content": item["content"], "token_count": item.get("token_count")}
+            for item in chunking.split_text(content, selected)]
+
+def _saved_policy(db: sqlite3.Connection) -> tuple[dict[str, Any], str]:
+    row = db.execute("SELECT policy_json,policy_sha256 FROM knowledge_chunk_policy WHERE id=1").fetchone()
+    if not row:
+        policy = chunking.normalize_policy({"strategy": "character", "size": CHUNK_CODEPOINTS, "overlap": CHUNK_OVERLAP})
+        return policy, chunking.policy_fingerprint(policy)
+    policy = chunking.normalize_policy(json.loads(row["policy_json"]))
+    return policy, str(row["policy_sha256"])
+
+def _chunk_identity(document_id: str, revision: int, policy_hash: str, chunk: dict[str, Any]) -> str:
+    identity = f"{document_id}:{revision}:{policy_hash}:{chunk['ordinal']}:{chunk['start']}:{chunk['end']}"
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+def _store_chunks(db: sqlite3.Connection, document_id: str, title: str, source: str, content: str, revision: int, policy: dict[str, Any], policy_hash: str) -> list[dict[str, Any]]:
+    result = []
+    for chunk in _split(content, policy):
+        chunk_id = _chunk_identity(document_id, revision, policy_hash, chunk)
+        db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content,source_revision,policy_sha256,token_count) VALUES(?,?,?,?,?,?,?,?,?)", (chunk_id, document_id, chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"], revision, policy_hash, chunk.get("token_count")))
+        db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], title, source, document_id, chunk_id))
+        result.append({**chunk, "id": chunk_id, "source_revision": revision, "policy_sha256": policy_hash})
+    return result
 
 
 def preview(payload: dict[str, Any]) -> dict[str, Any]:
@@ -108,6 +123,44 @@ def preview(payload: dict[str, Any]) -> dict[str, Any]:
     source = _text(payload.get("source_label", ""), "source_label", MAX_SOURCE_CODEPOINTS, required=False)
     content, size = _content_bytes(payload.get("content"))
     return {"title": title, "source_label": source, "content_bytes": size, "chunks": _split(content)}
+
+
+def preview_chunks(payload: dict[str, Any]) -> dict[str, Any]:
+    content, size = _content_bytes(payload.get("content"))
+    if set(payload) - {"content", "strategy", "size", "overlap"}:
+        raise KnowledgeError("chunk preview accepts content and chunk policy fields only")
+    try:
+        policy = chunking.normalize_policy({"strategy": payload.get("strategy", "character"), "size": payload.get("size", 1800), "overlap": payload.get("overlap", 200)})
+        info = chunking.tokenizer_info()
+        tokenizer = token_preview._load_tokenizer() if policy.get("strategy") == "token" and info.get("available") else None
+        chunks = chunking.split_text(content, policy, tokenizer=tokenizer)
+    except Exception as exc:
+        message = str(exc)
+        raise KnowledgeError(message if len(message) < 300 else "Chunk policy or tokenizer is unavailable") from None
+    return {"content_bytes": size, "policy": policy, "policy_sha256": chunking.policy_fingerprint(policy), "tokenizer": info, "chunks": chunks}
+
+
+def set_chunk_policy(payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        policy = chunking.normalize_policy(payload.get("policy"))
+    except Exception as exc:
+        raise KnowledgeError(str(exc)) from None
+    policy_json = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+    fingerprint = chunking.policy_fingerprint(policy)
+    with concepts._connect_db() as db:
+        _schema(db)
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("UPDATE knowledge_chunk_policy SET policy_json=?,policy_sha256=?,updated_at=? WHERE id=1", (policy_json, fingerprint, _now()))
+        if db.execute("SELECT 1 FROM knowledge_chunks WHERE policy_sha256<>? LIMIT 1", (fingerprint,)).fetchone():
+            _mark_es_stale(db)
+    return {"policy": policy, "policy_sha256": fingerprint}
+
+
+def get_chunk_policy() -> dict[str, Any]:
+    with concepts._connect_db() as db:
+        _schema(db)
+        policy, fingerprint = _saved_policy(db)
+    return {"policy": policy, "policy_sha256": fingerprint}
 
 
 def _schema(db: sqlite3.Connection) -> None:
@@ -130,8 +183,9 @@ def _metadata(row: sqlite3.Row) -> dict[str, Any]:
 
 def _chunks(db: sqlite3.Connection, document_id: str) -> list[dict[str, Any]]:
     return [{"id": row["id"], "ordinal": row["ordinal"], "start": row["start_offset"],
-             "end": row["end_offset"], "content": row["content"]}
-            for row in db.execute("SELECT id,ordinal,start_offset,end_offset,content FROM knowledge_chunks WHERE document_id=? ORDER BY ordinal", (document_id,))]
+             "end": row["end_offset"], "content": row["content"], "source_revision": row["source_revision"],
+             "policy_sha256": row["policy_sha256"], "token_count": row["token_count"]}
+            for row in db.execute("SELECT id,ordinal,start_offset,end_offset,content,source_revision,policy_sha256,token_count FROM knowledge_chunks WHERE document_id=? ORDER BY ordinal", (document_id,))]
 
 
 def list_documents() -> dict[str, Any]:
@@ -159,10 +213,10 @@ def save_document(payload: dict[str, Any]) -> dict[str, Any]:
     if document_id is not None:
         document_id = _text(document_id, "document_id", 64)
     now = _now()
-    new_chunks = _split(content)
     with concepts._connect_db() as db:
         _schema(db)
         db.execute("BEGIN IMMEDIATE")
+        policy, policy_hash = _saved_policy(db)
         current = None
         if document_id:
             current = db.execute("SELECT id,created_at,title,source_label,content,content_sha256,revision FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
@@ -182,13 +236,9 @@ def save_document(payload: dict[str, Any]) -> dict[str, Any]:
             db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (document_id,))
         else:
             document_id = str(uuid.uuid4())
+            revision = 1
             db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,1)", (document_id, title, source, content, size, now, now, hashlib.sha256(content.encode("utf-8")).hexdigest()))
-        chunk_rows = []
-        for chunk in new_chunks:
-            chunk_id = str(uuid.uuid4())
-            db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES(?,?,?,?,?,?)", (chunk_id, document_id, chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"]))
-            db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], title, source, document_id, chunk_id))
-            chunk_rows.append({"id": chunk_id, "ordinal": chunk["ordinal"], "start": chunk["start"], "end": chunk["end"], "content": chunk["content"]})
+        chunk_rows = _store_chunks(db, document_id, title, source, content, revision, policy, policy_hash)
         _mark_es_stale(db)
         row = db.execute("SELECT id,title,source_label,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision FROM knowledge_documents WHERE id=?", (document_id,)).fetchone()
         return {"document": _metadata(row), "chunks": chunk_rows}
@@ -366,6 +416,7 @@ def import_commit(payload: dict[str, Any]) -> dict[str, Any]:
     with concepts._connect_db() as db:
         _schema(db)
         db.execute("BEGIN IMMEDIATE")
+        policy, policy_hash = _saved_policy(db)
         duplicate_rows: set[int] = set()
         preview_seen: set[str] = set()
         for record in records:
@@ -395,7 +446,6 @@ def import_commit(payload: dict[str, Any]) -> dict[str, Any]:
             else:
                 action = None
             now = _now()
-            chunk_rows = _split(record["content"])
             if duplicate:
                 current_tuple = (duplicate["title"], duplicate["source_label"], duplicate["content"], duplicate["source_name"], duplicate["source_record"], duplicate["source_sha256"])
                 next_tuple = (record["title"], record["source_label"], record["content"], filename, str(row_number), file_hash)
@@ -425,10 +475,7 @@ def import_commit(payload: dict[str, Any]) -> dict[str, Any]:
                 revision = 1
                 db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)", (duplicate_id, record["title"], record["source_label"], record["content"], record["content_bytes"], now, now, filename, str(row_number), file_hash, record["content_sha256"]))
                 outcome = "created"
-            for chunk in chunk_rows:
-                chunk_id = str(uuid.uuid4())
-                db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES(?,?,?,?,?,?)", (chunk_id, duplicate_id, chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"]))
-                db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], record["title"], record["source_label"], duplicate_id, chunk_id))
+            _store_chunks(db, duplicate_id, record["title"], record["source_label"], record["content"], revision, policy, policy_hash)
             outcomes.append({"row_number": row_number, "outcome": outcome, "document_id": duplicate_id, "revision": revision})
             seen_hashes[record["content_sha256"]] = duplicate_id
             any_change = True
@@ -593,6 +640,7 @@ def restore_commit(payload: dict[str, Any]) -> dict[str, Any]:
     with concepts._connect_db() as db:
         _schema(db)
         db.execute("BEGIN IMMEDIATE")
+        policy, policy_hash = _saved_policy(db)
         db_conflicts = {row[0] for row in db.execute("SELECT id FROM knowledge_documents")}
         doc_archive_ids = {doc["id"] for doc in prepared["documents"]}
         if set(action_by_id) - (db_conflicts & doc_archive_ids):
@@ -646,10 +694,7 @@ def restore_commit(payload: dict[str, Any]) -> dict[str, Any]:
                 db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (doc["id"],))
             else:
                 db.execute("INSERT INTO knowledge_documents(id,title,source_label,content,content_bytes,created_at,updated_at,source_name,source_record,source_sha256,content_sha256,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", (doc["id"], doc["title"], doc["source_label"], doc["content"], doc["content_bytes"], doc["created_at"], doc["updated_at"], doc["source_name"], doc["source_record"], doc["source_sha256"], doc["content_sha256"], revision))
-            for chunk in _split(doc["content"]):
-                chunk_id = str(uuid.uuid4())
-                db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content) VALUES(?,?,?,?,?,?)", (chunk_id, doc["id"], chunk["ordinal"], chunk["start"], chunk["end"], chunk["content"]))
-                db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], doc["title"], doc["source_label"], doc["id"], chunk_id))
+            _store_chunks(db, doc["id"], doc["title"], doc["source_label"], doc["content"], revision, policy, policy_hash)
             docs_out.append({"document_id": doc["id"], "outcome": outcome, "revision": revision})
         applied_docs = {item["document_id"] for item in docs_out if item["outcome"] != "skipped"}
         for document_id in applied_docs:
@@ -774,7 +819,19 @@ def _vector_passages(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
     return passages
 
 
-def _sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False) -> dict[str, Any]:
+class _ReindexCancelled(Exception):
+    pass
+
+
+class _BulkFailure(Exception):
+    def __init__(self, failures: list[dict[str, Any]]):
+        super().__init__("one or more staged chunks failed")
+        self.failures = failures
+
+
+def _sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False,
+             progress: Any = None, cancel_check: Any = None, publish_lock: threading.Lock | None = None,
+             on_published: Any = None) -> dict[str, Any]:
     alias = _owner_alias()
     owner = concepts._OWNER_ID.get()
     fingerprint = _local_fingerprint()
@@ -810,6 +867,7 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
     target = validate_index(f"{alias}-g{generation}")
     old: dict[str, Any] = {}
     alias_swapped = False
+    publication_lock_held = False
     try:
         properties = {"owner_id": {"type": "keyword"}, "document_id": {"type": "keyword"}, "chunk_id": {"type": "keyword"}, "title": {"type": "text"}, "source_label": {"type": "text"}, "rag_chunk_text": {"type": "text"}, "ordinal": {"type": "integer"}, "start_offset": {"type": "integer"}, "end_offset": {"type": "integer"}, "passage_ordinal": {"type": "integer"}}
         if vector:
@@ -818,8 +876,8 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
         if vector:
             mappings["_meta"] = {"private_vector_recipe": PRIVATE_VECTOR_RECIPE}
         request(connection, "PUT", quote(target, safe=''), {"mappings": mappings})
+        staged_items: list[tuple[dict[str, Any], dict[str, Any]]] = []
         if rows:
-            lines = []
             items = []
             if vector:
                 rows_by_chunk = {row["chunk_id"]: row for row in rows}
@@ -829,13 +887,29 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
             else:
                 for row in rows:
                     items.append(({"_index": target, "_id": row["chunk_id"]}, {"owner_id": owner, "document_id": row["document_id"], "chunk_id": row["chunk_id"], "title": row["title"], "source_label": row["source_label"], "rag_chunk_text": row["content"], "ordinal": row["ordinal"], "start_offset": row["start_offset"], "end_offset": row["end_offset"]}))
-            for action, document in items:
-                lines.append(json.dumps({"index": action}, separators=(",", ":")))
-                lines.append(json.dumps(document, ensure_ascii=False, separators=(",", ":")))
-            bulk = request(connection, "POST", "_bulk", "\n".join(lines) + "\n", content_type="application/x-ndjson")
-            failures = [item for result in bulk.get("items", []) for item in result.values() if int(item.get("status", 500)) >= 300]
-            if bulk.get("errors") or failures or len(bulk.get("items", [])) != len(items):
-                raise ElasticsearchError("Bulk indexing reported one or more failed knowledge chunks", 503)
+            staged_items = items
+            batch_size = 200
+            for batch_start in range(0, len(items), batch_size):
+                if cancel_check and cancel_check():
+                    raise _ReindexCancelled()
+                batch = items[batch_start:batch_start + batch_size]
+                lines = []
+                for action, document in batch:
+                    lines.append(json.dumps({"index": action}, separators=(",", ":")))
+                    lines.append(json.dumps(document, ensure_ascii=False, separators=(",", ":")))
+                bulk = request(connection, "POST", "_bulk", "\n".join(lines) + "\n", content_type="application/x-ndjson")
+                failures = [item for result in bulk.get("items", []) for item in result.values() if int(item.get("status", 500)) >= 300]
+                if bulk.get("errors") or failures or len(bulk.get("items", [])) != len(batch):
+                    detail_by_id = {str(action.get("_id")): document for action, document in batch}
+                    failed_chunks = []
+                    for result in failures:
+                        chunk_id = str(result.get("_id", ""))
+                        document = detail_by_id.get(chunk_id, {})
+                        failed_chunks.append({"document_id": document.get("document_id", ""), "chunk_id": chunk_id,
+                                              "status": int(result.get("status", 500)), "message": "Elasticsearch rejected this staged chunk."})
+                    raise _BulkFailure(failed_chunks[:50])
+                if progress:
+                    progress(min(batch_start + len(batch), len(items)), len(items))
         request(connection, "POST", f"{quote(target, safe='')}/_refresh")
         visible = request(connection, "POST", f"{quote(target, safe='')}/_search", {"size": 0, "track_total_hits": True, "query": {"match_all": {}}})
         total = visible.get("hits", {}).get("total", 0)
@@ -843,6 +917,22 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
         expected_count = len(passages) if vector else len(rows)
         if visible_count != expected_count:
             raise ElasticsearchError("Staged knowledge generation is not fully visible after refresh", 503)
+        for verify_start in range(0, len(staged_items), 200):
+            batch = staged_items[verify_start:verify_start + 200]
+            expected_by_id = {str(action["_id"]): document for action, document in batch}
+            verified = request(connection, "POST", f"{quote(target, safe='')}/_mget", {
+                "docs": [{"_id": item_id, "_source": ["owner_id", "document_id", "chunk_id", "ordinal", "start_offset", "end_offset", "passage_ordinal"]}
+                          for item_id in expected_by_id]
+            })
+            actual_by_id = {str(doc.get("_id")): doc for doc in verified.get("docs", [])}
+            for item_id, expected in expected_by_id.items():
+                actual = actual_by_id.get(item_id)
+                source = actual.get("_source", {}) if actual else {}
+                keys = ("owner_id", "document_id", "chunk_id", "ordinal", "start_offset", "end_offset")
+                if not actual or not actual.get("found") or any(source.get(key) != expected.get(key) for key in keys):
+                    raise ElasticsearchError("Staged knowledge generation contains a missing or mismatched chunk identity", 503)
+                if "passage_ordinal" in expected and source.get("passage_ordinal") != expected.get("passage_ordinal"):
+                    raise ElasticsearchError("Staged knowledge generation contains a mismatched passage identity", 503)
         if vector:
             staged_mappings = request(connection, "GET", f"{quote(target, safe='')}/_mapping")
             staged_mapping = next(iter(staged_mappings.values())).get("mappings", {})
@@ -865,6 +955,13 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
                 raise ElasticsearchError("Existing private alias has an unexpected target set", 409)
         if _local_fingerprint() != fingerprint:
             raise ElasticsearchError("Local knowledge changed during indexing; retry synchronization", 409)
+        if cancel_check and cancel_check():
+            raise _ReindexCancelled()
+        if publish_lock is not None:
+            publish_lock.acquire()
+            publication_lock_held = True
+            if cancel_check and cancel_check():
+                raise _ReindexCancelled()
         actions = [{"remove": {"index": name, "alias": alias}} for name in old]
         if rows:
             actions.append({"add": {"index": target, "alias": alias, "is_write_index": True}})
@@ -878,7 +975,13 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
             if current != fingerprint:
                 raise ElasticsearchError("Local knowledge changed during indexing; retry synchronization", 409)
             db.execute("UPDATE knowledge_es_state SET state='in_sync',generation=?,indexed_chunks=?,local_fingerprint=?,synced_fingerprint=?,last_synced_at=?,error='',vector_state=?,vector_recipe=?,vector_chunks=? WHERE id=1", (generation, len(rows), fingerprint, fingerprint, _now(), "in_sync" if vector else "not_indexed", recipe, len(passages) if vector else 0))
-        return es_status(connection)
+        result = es_status(connection)
+        if on_published:
+            on_published()
+        if publication_lock_held:
+            publish_lock.release()
+            publication_lock_held = False
+        return result
     except Exception as exc:
         if alias_swapped:
             rollback = ([{"remove": {"index": target, "alias": alias}}] if rows else [])
@@ -887,15 +990,26 @@ def _sync_es(connection: Connection, *, vector: bool = False, allow_model_downlo
                 request(connection, "POST", "_aliases", {"actions": rollback})
             except Exception:
                 pass
+        if publication_lock_held:
+            publish_lock.release()
+            publication_lock_held = False
         try:
             request(connection, "DELETE", quote(target, safe=''))
         except Exception:
             pass
+        if isinstance(exc, _ReindexCancelled):
+            with concepts._connect_db() as db:
+                _schema(db)
+                db.execute("UPDATE knowledge_es_state SET state='stale',error='Reindex cancelled; prior generation remains selected' WHERE id=1")
+            raise
         with concepts._connect_db() as db:
             _schema(db)
             safe_error = f"Elasticsearch sync failed (HTTP {exc.status})" if isinstance(exc, ElasticsearchError) and exc.status else "Elasticsearch sync failed"
             db.execute("UPDATE knowledge_es_state SET state='error',error=? WHERE id=1", (safe_error,))
-        raise KnowledgeError("Private knowledge sync failed; the previous generation remains selected. Retry synchronization.", 503) from None
+        wrapped = KnowledgeError("Private knowledge sync failed; the previous generation remains selected. Retry synchronization.", 503)
+        if isinstance(exc, _BulkFailure):
+            wrapped.failed_documents = exc.failures
+        raise wrapped from None
 
 
 def sync_es(connection: Connection, *, vector: bool = False, allow_model_download: bool = False) -> dict[str, Any]:
@@ -911,6 +1025,229 @@ def sync_es(connection: Connection, *, vector: bool = False, allow_model_downloa
             return _sync_es(connection, vector=vector, allow_model_download=allow_model_download)
     finally:
         lock.release()
+
+
+_JOB_STATES = {"queued", "running", "cancelling", "cancelled", "interrupted", "failed", "complete"}
+_ACTIVE_JOB_IDS: set[str] = set()
+_ACTIVE_JOB_IDS_GUARD = threading.Lock()
+_JOB_PUBLISH_LOCKS: dict[str, threading.Lock] = {}
+_JOB_PUBLISH_LOCKS_GUARD = threading.Lock()
+
+
+def _job_publish_lock(job_id: str) -> threading.Lock:
+    with _JOB_PUBLISH_LOCKS_GUARD:
+        return _JOB_PUBLISH_LOCKS.setdefault(job_id, threading.Lock())
+
+
+def _recover_jobs(db: sqlite3.Connection) -> None:
+    with _ACTIVE_JOB_IDS_GUARD:
+        active = tuple(_ACTIVE_JOB_IDS)
+    if active:
+        placeholders = ",".join("?" for _ in active)
+        db.execute(f"UPDATE knowledge_reindex_jobs SET state='interrupted',safe_error='The server stopped before publication. Retry this job to resume from local source documents.',updated_at=? WHERE state IN ('queued','running','cancelling') AND id NOT IN ({placeholders})", (_now(), *active))
+    else:
+        db.execute("UPDATE knowledge_reindex_jobs SET state='interrupted',safe_error='The server stopped before publication. Retry this job to resume from local source documents.',updated_at=? WHERE state IN ('queued','running','cancelling')", (_now(),))
+
+
+def _job_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {"job_id": row["id"], "state": row["state"], "completed": int(row["completed_documents"]),
+            "total": int(row["total_documents"]), "failed_documents": json.loads(row["failed_documents_json"] or "[]"),
+            "generation": row["target_generation"], "safe_error": row["safe_error"], "updated_at": row["updated_at"]}
+
+
+def reindex_status(payload: dict[str, Any]) -> dict[str, Any]:
+    job_id = _text(payload.get("job_id"), "job_id", 64)
+    with concepts._connect_db() as db:
+        _schema(db)
+        _recover_jobs(db)
+        row = db.execute("SELECT * FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        raise KnowledgeError("Reindex job not found", 404)
+    return _job_record(row)
+
+
+def reindex_latest(_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    with concepts._connect_db() as db:
+        _schema(db)
+        _recover_jobs(db)
+        row = db.execute("SELECT * FROM knowledge_reindex_jobs ORDER BY created_at DESC,rowid DESC LIMIT 1").fetchone()
+    return {"job": _job_record(row) if row else None}
+
+
+def _job_update(job_id: str, **values: Any) -> None:
+    allowed = {"state", "completed_documents", "failed_documents_json", "target_generation", "safe_error", "cancel_requested"}
+    if set(values) - allowed:
+        raise ValueError("unsupported job update")
+    values["updated_at"] = _now()
+    assignments = ",".join(f"{key}=?" for key in values)
+    with concepts._connect_db() as db:
+        _schema(db)
+        db.execute(f"UPDATE knowledge_reindex_jobs SET {assignments} WHERE id=?", (*values.values(), job_id))
+
+
+def _document_source_fingerprint(rows: list[sqlite3.Row]) -> str:
+    return _hash([(row["id"], int(row["revision"]), row["title"], row["source_label"], row["content"]) for row in rows])
+
+
+def _run_reindex(owner: str, job_id: str, connection: Connection) -> None:
+    with _ACTIVE_JOB_IDS_GUARD:
+        _ACTIVE_JOB_IDS.add(job_id)
+    current_document_id: str | None = None
+    try:
+        with concepts.owner_scope(owner):
+            with _SYNC_LOCKS_GUARD:
+                lock = _SYNC_LOCKS.setdefault(owner, threading.Lock())
+            if not lock.acquire(blocking=False):
+                _job_update(job_id, state="failed", safe_error="Another private sync is running for this account. Retry after it finishes.")
+                return
+            try:
+                with concepts._connect_db() as db:
+                    _schema(db)
+                    job = db.execute("SELECT * FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()
+                    policy = chunking.normalize_policy(json.loads(job["policy_json"]))
+                    fingerprint = chunking.policy_fingerprint(policy)
+                    if fingerprint != job["policy_sha256"]:
+                        raise KnowledgeError("Saved chunk policy fingerprint is invalid; retry with a new job.")
+                    tokenizer = None
+                    if policy.get("strategy") == "token":
+                        info = chunking.tokenizer_info()
+                        if not info.get("available"):
+                            raise KnowledgeError(info.get("reason") or "Pinned tokenizer is unavailable; install and prepare the pinned tokenizer before retrying.", 503)
+                        tokenizer = token_preview._load_tokenizer()
+                    rows = db.execute("SELECT id,title,source_label,content,revision FROM knowledge_documents ORDER BY id").fetchall()
+                    source_fingerprint = _document_source_fingerprint(rows)
+                    if source_fingerprint != job["source_fingerprint"]:
+                        raise KnowledgeError("Local documents changed after this job was queued. Start a new reindex to publish current sources.", 409)
+                    if db.execute("SELECT cancel_requested FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()[0]:
+                        _job_update(job_id, state="cancelled", safe_error="Cancelled before indexing; the previous generation remains selected.")
+                        return
+                    db.execute("BEGIN IMMEDIATE")
+                    current_sources = db.execute("SELECT id,title,source_label,content,revision FROM knowledge_documents ORDER BY id").fetchall()
+                    if _document_source_fingerprint(current_sources) != source_fingerprint:
+                        raise KnowledgeError("Local documents changed while preparing reindex chunks. The previous generation remains selected; start a new job.", 409)
+                    for doc in rows:
+                        current_document_id = str(doc["id"])
+                        db.execute("DELETE FROM knowledge_fts WHERE document_id=?", (doc["id"],))
+                        db.execute("DELETE FROM knowledge_chunks WHERE document_id=?", (doc["id"],))
+                        chunks = chunking.split_text(doc["content"], policy, tokenizer=tokenizer)
+                        for chunk in chunks:
+                            chunk_id = hashlib.sha256(f"{doc['id']}:{doc['revision']}:{fingerprint}:{chunk['ordinal']}:{chunk['start_offset']}:{chunk['end_offset']}".encode()).hexdigest()
+                            db.execute("INSERT INTO knowledge_chunks(id,document_id,ordinal,start_offset,end_offset,content,source_revision,policy_sha256,token_count) VALUES(?,?,?,?,?,?,?,?,?)", (chunk_id, doc["id"], chunk["ordinal"], chunk["start_offset"], chunk["end_offset"], chunk["content"], doc["revision"], fingerprint, chunk.get("token_count")))
+                            db.execute("INSERT INTO knowledge_fts(content,title,source_label,document_id,chunk_id) VALUES(?,?,?,?,?)", (chunk["content"], doc["title"], doc["source_label"], doc["id"], chunk_id))
+                    current_document_id = None
+                    db.commit()
+                _job_update(job_id, state="running", completed_documents=0, target_generation="")
+                state = {}
+                with concepts._connect_db() as db:
+                    state = dict(db.execute("SELECT generation FROM knowledge_es_state WHERE id=1").fetchone())
+                _job_update(job_id, target_generation=f"{_owner_alias()}-g{int(state['generation']) + 1}")
+
+                def cancelled() -> bool:
+                    with concepts._connect_db() as db:
+                        current_job = db.execute("SELECT cancel_requested,source_fingerprint FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()
+                        current_docs = db.execute("SELECT id,title,source_label,content,revision FROM knowledge_documents ORDER BY id").fetchall()
+                    if _document_source_fingerprint(current_docs) != current_job["source_fingerprint"]:
+                        raise KnowledgeError("Local documents changed during reindex. The previous generation remains selected; start a new job.", 409)
+                    return bool(current_job["cancel_requested"])
+
+                def progress(done_chunks: int, total_chunks: int) -> None:
+                    if cancelled():
+                        raise _ReindexCancelled()
+                    with concepts._connect_db() as db:
+                        counts = [int(row["chunk_count"]) for row in db.execute("SELECT d.id,COUNT(c.id) AS chunk_count FROM knowledge_documents d LEFT JOIN knowledge_chunks c ON c.document_id=d.id GROUP BY d.id ORDER BY d.id")]
+                    completed = 0
+                    consumed = 0
+                    for count in counts:
+                        consumed += count
+                        if consumed <= done_chunks:
+                            completed += 1
+                        else:
+                            break
+                    _job_update(job_id, completed_documents=completed)
+
+                try:
+                    with private_sync_scope():
+                        _sync_es(connection, progress=progress, cancel_check=cancelled,
+                                 publish_lock=_job_publish_lock(job_id),
+                                 on_published=lambda: _job_update(job_id, state="complete", completed_documents=len(rows), safe_error=""))
+                except _ReindexCancelled:
+                    _job_update(job_id, state="cancelled", safe_error="Cancelled before alias publication; the previous generation remains selected.")
+            finally:
+                lock.release()
+    except Exception as exc:
+        safe = str(exc)[:300] if isinstance(exc, KnowledgeError) else "Reindex failed before publication. Check the private Elasticsearch connection and retry."
+        failures = getattr(exc, "failed_documents", None) or ([{"document_id": current_document_id, "message": safe}] if current_document_id else [])
+        # The main worker scope has unwound before this handler runs. Rebind the
+        # authenticated owner so failure state is persisted to the same account DB.
+        with concepts.owner_scope(owner):
+            _job_update(job_id, state="failed", safe_error=safe,
+                        failed_documents_json=json.dumps(failures, separators=(",", ":")))
+    finally:
+        with _ACTIVE_JOB_IDS_GUARD:
+            _ACTIVE_JOB_IDS.discard(job_id)
+
+
+def reindex_start(payload: dict[str, Any], connection: Connection) -> dict[str, Any]:
+    owner = concepts._OWNER_ID.get()
+    if not owner:
+        raise KnowledgeError("Authenticated account scope is required", 401)
+    if set(payload) - {"connection", "policy"}:
+        raise KnowledgeError("Reindex accepts only connection and policy; account and alias are server-derived")
+    with concepts._connect_db() as db:
+        _schema(db)
+        _recover_jobs(db)
+        active = db.execute("SELECT 1 FROM knowledge_reindex_jobs WHERE state IN ('queued','running','cancelling') LIMIT 1").fetchone()
+        if active:
+            raise KnowledgeError("A reindex job is already active for this account", 409)
+        if payload.get("policy") is None:
+            policy, fingerprint = _saved_policy(db)
+        else:
+            try:
+                policy = chunking.normalize_policy(payload["policy"])
+            except Exception as exc:
+                raise KnowledgeError(str(exc)) from None
+            fingerprint = chunking.policy_fingerprint(policy)
+            db.execute("UPDATE knowledge_chunk_policy SET policy_json=?,policy_sha256=?,updated_at=? WHERE id=1", (json.dumps(policy, sort_keys=True, separators=(",", ":")), fingerprint, _now()))
+            if db.execute("SELECT 1 FROM knowledge_chunks WHERE policy_sha256<>? LIMIT 1", (fingerprint,)).fetchone():
+                _mark_es_stale(db)
+        if policy.get("strategy") == "token" and not chunking.tokenizer_info().get("available"):
+            raise KnowledgeError(chunking.tokenizer_info().get("reason") or "Pinned tokenizer is unavailable", 503)
+        rows = db.execute("SELECT id,title,source_label,content,revision FROM knowledge_documents ORDER BY id").fetchall()
+        source_fingerprint = _document_source_fingerprint(rows)
+        job_id = str(uuid.uuid4())
+        now = _now()
+        policy_json = json.dumps(policy, sort_keys=True, separators=(",", ":"))
+        db.execute("INSERT INTO knowledge_reindex_jobs(id,state,policy_json,policy_sha256,created_at,updated_at,total_documents,completed_documents,failed_documents_json,source_fingerprint,target_generation,safe_error,cancel_requested) VALUES(?,'queued',?,?,?,?,?,0,'[]',?,'','',0)", (job_id, policy_json, fingerprint, now, now, len(rows), source_fingerprint))
+    thread = threading.Thread(target=_run_reindex, args=(owner, job_id, connection), name=f"knowledge-reindex-{job_id[:8]}", daemon=True)
+    with _ACTIVE_JOB_IDS_GUARD:
+        _ACTIVE_JOB_IDS.add(job_id)
+    thread.start()
+    return {"job_id": job_id, "state": "queued", "total": len(rows), "generation": "", "alias": _owner_alias()}
+
+
+def reindex_cancel(payload: dict[str, Any]) -> dict[str, Any]:
+    job_id = _text(payload.get("job_id"), "job_id", 64)
+    lock = _job_publish_lock(job_id)
+    with lock:
+        with concepts._connect_db() as db:
+            _schema(db)
+            row = db.execute("SELECT state FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            raise KnowledgeError("Reindex job not found", 404)
+        if row["state"] in {"complete", "failed", "interrupted", "cancelled"}:
+            return reindex_status({"job_id": job_id})
+        _job_update(job_id, state="cancelling", cancel_requested=1, safe_error="Cancellation requested; the prior generation remains selected until publication completes.")
+    return reindex_status({"job_id": job_id})
+
+
+def reindex_retry(payload: dict[str, Any], connection: Connection) -> dict[str, Any]:
+    job_id = _text(payload.get("job_id"), "job_id", 64)
+    with concepts._connect_db() as db:
+        _schema(db)
+        previous = db.execute("SELECT policy_json FROM knowledge_reindex_jobs WHERE id=?", (job_id,)).fetchone()
+    if not previous:
+        raise KnowledgeError("Reindex job not found", 404)
+    return reindex_start({"connection": payload.get("connection"), "policy": json.loads(previous["policy_json"])}, connection)
 
 
 def search_es(connection: Connection, query: str, limit: int = 10) -> dict[str, Any]:

@@ -76,6 +76,8 @@ const state = {
   knowledgeEvalRequest: 0,
   knowledgeEvalInFlight: false,
   knowledgeControlsBound: false,
+  knowledgeReindexJobId: null,
+  knowledgeReindexTimer: null,
   knowledgeImport: null,
   knowledgeRestore: null,
   conceptFilters: [],
@@ -908,11 +910,65 @@ function renderKnowledgeChunks(chunks) {
   chunks.forEach((chunk) => {
     const card = document.createElement("article"); card.className = "knowledge-chunk";
     const heading = document.createElement("div"); heading.className = "knowledge-chunk-heading";
-    const label = document.createElement("strong"); label.textContent = `청크 ${Number(chunk.ordinal) + 1}`;
+    const label = document.createElement("strong"); label.textContent = `청크 ${Number(chunk.ordinal) + 1}${chunk.token_count == null ? "" : ` · ${chunk.token_count} tokens`}`;
     const offsets = document.createElement("span"); offsets.textContent = `${Number(chunk.start ?? chunk.start_offset) || 0}–${Number(chunk.end ?? chunk.end_offset) || 0}`;
     const text = document.createElement("pre"); text.textContent = String(chunk.content ?? chunk.text ?? "");
     heading.append(label, offsets); card.append(heading, text); root.append(card);
   });
+}
+
+function selectedKnowledgePolicy() {
+  return { strategy: $("#knowledge-chunk-strategy").value, size: Number($("#knowledge-chunk-size").value), overlap: Number($("#knowledge-chunk-overlap").value) };
+}
+
+function renderKnowledgeJob(job) {
+  const status = $("#knowledge-reindex-status");
+  const failed = Array.isArray(job.failed_documents) ? job.failed_documents : [];
+  status.textContent = `${job.state} · 문서 ${job.completed}/${job.total} 완료 · target ${job.generation || "미지정"}${job.safe_error ? ` · ${job.safe_error}` : ""}${failed.length ? ` · 실패 ${failed.length}건` : ""}`;
+  $("#knowledge-reindex-cancel").disabled = !["queued", "running", "cancelling"].includes(job.state);
+  $("#knowledge-reindex-retry").disabled = !["failed", "interrupted", "cancelled"].includes(job.state);
+  if (["queued", "running", "cancelling"].includes(job.state)) {
+    clearTimeout(state.knowledgeReindexTimer);
+    state.knowledgeReindexTimer = setTimeout(pollKnowledgeJob, 900);
+  }
+}
+
+async function pollKnowledgeJob() {
+  if (!state.knowledgeReindexJobId) return;
+  try {
+    const job = await api("/api/knowledge/reindex/status", { job_id: state.knowledgeReindexJobId });
+    renderKnowledgeJob(job);
+    if (job.state === "complete") { setKnowledgeEsFreshness(false); await loadKnowledgeEsStatus(); }
+    else if (["failed", "interrupted", "cancelled"].includes(job.state)) setKnowledgeEsFreshness(true, "재청킹 작업이 끝나지 않았습니다. 이전 비공개 별칭은 유지되며 상태를 확인한 뒤 재시도할 수 있습니다.");
+  } catch (error) { $("#knowledge-reindex-status").textContent = `상태를 확인하지 못했습니다 · ${error.message || "다시 확인하세요."}`; }
+}
+
+async function startKnowledgeReindex(retry = false) {
+  const policy = selectedKnowledgePolicy();
+  const result = await api(retry ? "/api/knowledge/reindex/retry" : "/api/knowledge/reindex/start", {
+    ...(retry ? { job_id: state.knowledgeReindexJobId } : { policy, connection: getConnection() }),
+    ...(retry ? { connection: getConnection() } : {}),
+  });
+  state.knowledgeReindexJobId = result.job_id;
+  renderKnowledgeJob({ ...result, completed: 0, failed_documents: [], safe_error: "" });
+  await pollKnowledgeJob();
+}
+
+async function loadKnowledgePolicy() {
+  try {
+    const saved = await api("/api/knowledge/chunks/policy/get", {});
+    const policy = saved.policy || {};
+    $("#knowledge-chunk-strategy").value = policy.strategy || "character";
+    $("#knowledge-chunk-size").value = policy.size || 1800;
+    $("#knowledge-chunk-overlap").value = policy.overlap || 200;
+  } catch { /* the migration or authenticated session may not be ready yet */ }
+  try {
+    const latest = await api("/api/knowledge/reindex/latest", {});
+    if (latest.job) {
+      state.knowledgeReindexJobId = latest.job.job_id;
+      renderKnowledgeJob(latest.job);
+    }
+  } catch { /* job recovery status is supplemental to local document access */ }
 }
 
 async function loadKnowledgeEsStatus() {
@@ -1681,9 +1737,9 @@ function bindKnowledgeControls() {
     if (knowledgeSizeBytes(fields.content) > KNOWLEDGE_MAX_BYTES) { $("#knowledge-editor-status").textContent = "문서가 1 MiB를 넘습니다. 내용을 줄인 뒤 다시 미리보세요."; updateKnowledgeEditor(); return; }
     $("#knowledge-preview-button").disabled = true; $("#knowledge-editor-status").textContent = "서버에서 청크를 미리 보는 중입니다.";
     try {
-      const result = await api("/api/knowledge/preview", fields);
+      const result = await api("/api/knowledge/chunks/preview", { content: fields.content, ...selectedKnowledgePolicy() });
       state.knowledgePreviewKey = knowledgePreviewKey(fields); renderKnowledgeChunks(result.chunks || []);
-      $("#knowledge-editor-status").textContent = "서버가 나눈 청크를 확인했습니다. 저장할 수 있습니다."; updateKnowledgeEditor();
+      $("#knowledge-editor-status").textContent = `${result.policy?.strategy || "청크"} 정책 · 실제 source offset과 제공된 token count를 확인했습니다. 저장할 수 있습니다.`; updateKnowledgeEditor();
     } catch { state.knowledgePreviewKey = null; $("#knowledge-editor-status").textContent = "청크 미리보기에 실패했습니다. 제목과 내용을 확인한 뒤 다시 시도하세요."; updateKnowledgeEditor(); }
     finally { $("#knowledge-preview-button").disabled = false; }
   });
@@ -1703,6 +1759,25 @@ function bindKnowledgeControls() {
   $("#knowledge-refresh-button").addEventListener("click", loadKnowledgeList);
   $("#knowledge-es-sync").addEventListener("click", syncKnowledgeEs);
   $("#knowledge-es-vector-sync").addEventListener("click", syncKnowledgeEsVectors);
+  $("#knowledge-reindex-start").addEventListener("click", async () => {
+    const button = $("#knowledge-reindex-start"); button.disabled = true;
+    try { await api("/api/knowledge/chunks/policy", { policy: selectedKnowledgePolicy() }); await startKnowledgeReindex(false); }
+    catch (error) { $("#knowledge-reindex-status").textContent = error.message || "재청킹 작업을 시작하지 못했습니다."; }
+    finally { button.disabled = false; }
+  });
+  $("#knowledge-policy-save").addEventListener("click", async () => {
+    try { const result = await api("/api/knowledge/chunks/policy", { policy: selectedKnowledgePolicy() }); $("#knowledge-reindex-status").textContent = `정책 저장 · ${result.policy.strategy} · ${result.policy_sha256}`; }
+    catch (error) { $("#knowledge-reindex-status").textContent = error.message || "정책을 저장하지 못했습니다."; }
+  });
+  $("#knowledge-reindex-cancel").addEventListener("click", async () => {
+    try { renderKnowledgeJob(await api("/api/knowledge/reindex/cancel", { job_id: state.knowledgeReindexJobId })); }
+    catch (error) { $("#knowledge-reindex-status").textContent = error.message || "취소 요청을 처리하지 못했습니다."; }
+  });
+  $("#knowledge-reindex-retry").addEventListener("click", async () => {
+    try { await startKnowledgeReindex(true); }
+    catch (error) { $("#knowledge-reindex-status").textContent = error.message || "재시도하지 못했습니다."; }
+  });
+  loadKnowledgePolicy();
   $("#knowledge-list").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-knowledge-action]"); if (!button) return;
     const id = button.dataset.documentId;

@@ -17,7 +17,7 @@ Structural exploration was requested through the `codebase-memory` skill. The sk
 | SQLite maintenance | `es_rag_tuner/db_maintenance.py` | Explicit local per-file backup and offline-confirmed restore with SQLite snapshots, schema/integrity validation, restrictive permissions, and atomic install. |
 | Elasticsearch transport | `es_rag_tuner/es_client.py` | Connection validation, HTTP requests, shared/private index guards and local owner scopes. |
 | Shared concepts and experiments | `es_rag_tuner/concepts.py` | Concept/query validation and persistence, judgments, preview/search, comparison, tuning, runs and profile export. |
-| Private documents and search | `es_rag_tuner/knowledge.py` | Account-scoped local document/chunk lifecycle, Elasticsearch sync/search, and private evaluation helpers. |
+| Private documents and search | `es_rag_tuner/knowledge.py`, `chunking.py` | Account-scoped source revisions, configurable offset-preserving chunks, persisted reindex jobs, staged private Elasticsearch generation publication, search, and private evaluation helpers. |
 | Retrieval strategies | `es_rag_tuner/retrieval.py`, `profile_runtime.py` | Lexical/vector/RRF retrieval and external search profile execution. |
 | Embeddings and token previews | `es_rag_tuner/embeddings.py`, `token_preview.py` | Local embedding runtime and optional tokenizer preparation/preview. |
 | Provider integration | `es_rag_tuner/ai_coach.py` | Optional Codex/Copilot readiness and session flows; must stay opt-in in CI and is not needed for default use. |
@@ -31,6 +31,7 @@ Structural exploration was requested through the `codebase-memory` skill. The sk
 - Authentication/session state and CSRF tokens are local app concerns; Elasticsearch credentials are connection inputs and should not be persisted by default.
 - `corpus.filter_fields` and request-supplied owner identifiers are not authorization. Private paths derive ownership from the authenticated server session and enforce their own owner/alias checks.
 - Shared-index search and account-private knowledge search are distinct routes and data paths. A shared index must not silently become an account-private corpus.
+- Account-private reindexing rebuilds local chunks from authoritative SQLite documents and stages a new owner-specific Elasticsearch generation. The previous alias remains selected until refresh and expected identity/count checks pass; cancelled, failed, or interrupted jobs require inspection or explicit retry. This is an indexing lifecycle guarantee, not representative retrieval-quality evidence.
 - Existing acceptance/browser fixtures may use mocks/synthetic data. Their evidence supports only the contract/UI cases they execute, not live retrieval quality, production deployment, or answer accuracy.
 - Protected POST dispatch is a route table, while loopback/Host/Origin, cookie/session, CSRF, role, and owner-scope decisions remain at the HTTP boundary. Domain modules continue to own feature operations.
 - SQLite schema versions are recorded per database file. The base file contains both control data and primary-account state; each secondary account has a separate UUID-named state file. Explicit backup/restore handles one file at a time, so several account files do not share a cross-file point-in-time transaction. Elasticsearch indices are excluded.

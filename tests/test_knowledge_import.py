@@ -157,7 +157,7 @@ def test_parallel_first_open_serializes_missing_database_creation(tmp_path, monk
     assert errors == []
     with sqlite3.connect(path) as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
-        assert db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version").fetchall() == [(1,), (2,)]
+        assert db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version").fetchall() == [(1,), (2,), (3,)]
 
 
 def test_jsonl_invalid_row_is_reported_without_echo_and_valid_rows_commit(accounts):
@@ -284,5 +284,5 @@ def test_state_v2_migration_is_repeatable_and_failure_preserves_v1_source(tmp_pa
     storage.migrate(db, "state")
     migrated = db.execute("SELECT content_sha256,revision,source_name FROM knowledge_documents WHERE id='legacy'").fetchone()
     assert tuple(migrated) == (hashlib.sha256(b"legacy text").hexdigest(), 1, "")
-    assert [row[0] for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version")] == [1, 2]
+    assert [row[0] for row in db.execute("SELECT version FROM app_schema_migrations WHERE component='state' ORDER BY version")] == [1, 2, 3]
     db.close()

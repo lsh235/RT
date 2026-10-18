@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.9.0",
-  "current_stage": "R04",
+  "current_version": "1.10.0",
+  "current_stage": "R05",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 13
+    "started_rounds": 15
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -122,23 +122,28 @@
         "docs/acceptance/v1.9.0-independent-qa.md",
         "docs/acceptance/v1.9.0-independent-qa-round1.md"
       ],
-      "commit": null,
+      "commit": "3eb09bf692de8a0338279f6e7f9c9df4de554419",
       "blockers": [
         "Representative retrieval-quality evaluation was NOT RUN in R04; the live Elasticsearch corpus was one synthetic document and the check was a lifecycle/BM25 smoke test only."
-      ]
+      ],
+      "tag": "v1.9.0"
     },
     {
       "stage": "R05",
       "version": "1.10.0",
-      "status": "pending",
+      "status": "in_progress",
       "owner_roles": [
         "C",
         "B",
         "F"
       ],
       "required_gates": "docs/acceptance/v1.10.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
+      "fix_rounds_used": 1,
+      "evidence": [
+        "docs/acceptance/v1.10.0.md",
+        "docs/acceptance/v1.10.0-independent-qa-round1.md",
+        "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+      ],
       "commit": null,
       "blockers": []
     },
@@ -254,67 +259,55 @@
   ],
   "current_gates": [
     {
-      "id": "format-parsing-field-mapping",
+      "id": "strategy-validation-chunk-boundaries",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
-      "id": "validation-partial-success",
+      "id": "real-tokenizer-evidence",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
-      "id": "provenance-revision-duplicates",
+      "id": "source-revision-active-chunks",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
-      "id": "crud-search-state-integration",
+      "id": "job-progress-cancel-retry-restart",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
-      "id": "account-usage-limits",
+      "id": "private-generation-alias-replacement",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
-    },
-    {
-      "id": "document-judgment-export-restore",
-      "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
       "id": "account-isolation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     },
     {
-      "id": "browser-import-lifecycle",
-      "required": true,
-      "status": "PASS (mock API)",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
-    },
-    {
-      "id": "private-elasticsearch-state",
-      "required": true,
-      "status": "PASS (task-owned local ES)",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
-    },
-    {
-      "id": "regression-docs-preservation",
+      "id": "migration-source-preservation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.9.0-independent-qa-round1.md"
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
+    },
+    {
+      "id": "browser-docs-regression",
+      "required": true,
+      "status": "PASS",
+      "evidence": "docs/acceptance/v1.10.0-independent-qa-fix1.md"
     }
   ],
-  "completed_commit": null,
+  "completed_commit": "3eb09bf692de8a0338279f6e7f9c9df4de554419",
   "remaining_blockers": [
     "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. Recheck with the content owners or remove/replace the data before public release.",
     "GitHub-hosted CI has not run; verify after the final authorized branch push.",

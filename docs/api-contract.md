@@ -1,6 +1,6 @@
 # Local API and storage contract
 
-This document describes the loopback HTTP API and local SQLite boundaries in v1.7.0. The workbench is a local application; these routes are not an externally hosted service contract.
+This document describes the loopback HTTP API and local SQLite boundaries through v1.10.0. The workbench is a local application; these routes are not an externally hosted service contract.
 
 ## Transport and authentication
 
@@ -46,6 +46,8 @@ All `POST` routes below require a JSON object. Unless stated otherwise, a succes
 | `/api/concepts/preview`, `/api/concepts/information-need-preview`, `/api/concepts/vector-candidates`, `/api/concepts/mode-comparison`, `/api/concepts/mode-comparison-group`, `/api/concepts/locate-document`, `/api/concepts/document`, `/api/concepts/judge` | Preview/evaluate a concept, compare retrieval modes, locate an exact document, and save a human relevance judgment. |
 | `/api/concepts/tune/readiness`, `/api/concepts/tune`, `/api/concepts/runs`, `/api/concepts/runs/export` | Check tuning readiness, run bounded tuning, inspect saved runs, and export a run. |
 | `/api/knowledge/list`, `/api/knowledge/preview`, `/api/knowledge/save`, `/api/knowledge/get`, `/api/knowledge/delete`, `/api/knowledge/search` | Manage and search documents in the authenticated account's private SQLite knowledge store. |
+| `/api/knowledge/chunks/preview`, `/api/knowledge/chunks/policy`, `/api/knowledge/chunks/policy/get` | Preview character, paragraph, or pinned-token chunk boundaries and inspect or save the current account's chunk policy. Preview is read-only; token chunking requires the exact pinned tokenizer. |
+| `/api/knowledge/reindex/start`, `/api/knowledge/reindex/status`, `/api/knowledge/reindex/latest`, `/api/knowledge/reindex/cancel`, `/api/knowledge/reindex/retry` | Start and inspect a persisted account-private reindex job, request cancellation, or retry a failed/interrupted job. The server derives account ownership and alias; jobs stage and verify a generation before publishing it. |
 | `/api/knowledge/es-sync`, `/api/knowledge/es-vector-sync`, `/api/knowledge/concept-preview`, `/api/knowledge/judge` | Sync the authenticated account's private corpus, preview/evaluate it, and save a human judgment. Private Elasticsearch aliases and owner filters remain server-derived. |
 | `/api/ai/status`, `/api/ai/sessions/create`, `/api/ai/sessions/message`, `/api/ai/sessions/history`, `/api/ai/sessions/reset`, `/api/ai/jobs/get`, `/api/ai/jobs/cancel` | Optional provider-session readiness and account-scoped session/job operations. Provider access remains opt-in. |
 
@@ -56,6 +58,8 @@ The route table is implemented in `es_rag_tuner/post_routes.py`. The HTTP handle
 - `ES_RAG_CONCEPT_DB` selects the base database; otherwise the application uses `~/.local/share/es-rag-workbench/concepts.sqlite3`.
 - The base database contains auth/control tables and the primary account's application state. A secondary account uses a separate UUID-named file under `<base filename>.accounts/`.
 - Knowledge documents, chunks, FTS data, judgments, and Elasticsearch sync/vector state live in the current account's state database. Elasticsearch indices are outside this SQLite backup boundary.
+- State migration v3 records chunk source revision, policy fingerprint, and exact token count when available; it also stores the account's selected chunk policy and persisted reindex jobs. Existing documents and judgments remain the source of truth. A job rebuilds local chunks, stages a private Elasticsearch generation, verifies expected IDs and owner identity, refreshes it, then switches only that account's alias. A failed or cancelled publication retains the previous alias; restart recovery marks unfinished jobs interrupted for an explicit retry.
+- Chunk offsets are 0-based half-open positions in the original source text. Character and paragraph policies use source offsets; token policy uses the pinned E5 tokenizer's source offsets and fails if that tokenizer is unavailable rather than substituting an estimate. Chunk policy changes make the private sync state stale until a successful reindex.
 - `app_schema_migrations` records a `component` and `version` for each SQLite file. The base file can have both `control` and `state` migration entries. Current schema setup recognizes the existing legacy tables and adds only declared fields/tables; unknown table layouts and future version numbers fail closed.
 - Before a component migration changes a file, the migration runner creates a SQLite backup snapshot through Python's `Connection.backup`, verifies `PRAGMA integrity_check`, and stores a mode-`0600` recovery file beside the database named `<database>.pre-<component>-v<target-version>.bak`. A failed migration rolls back its transaction and retains the snapshot. Keep these files private; they contain the same data as the database. See the [SQLite Online Backup API](https://www.sqlite.org/backup.html) and [Python `sqlite3.Connection.backup`](https://docs.python.org/3/library/sqlite3.html#sqlite3.Connection.backup).
 

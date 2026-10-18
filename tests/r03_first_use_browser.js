@@ -51,7 +51,7 @@ async function main() {
       apiCalls.push({ path: url.pathname, body });
       const json = (value, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
       if (url.pathname === "/api/auth/session") return json({ configured: true, authenticated: true, csrf_token: "fixture", user: { id: "fixture-user", username: "fixture", display_name: "Fixture", role: "user" } });
-      if (url.pathname === "/api/health") return json({ version: "1.9.0" });
+      if (url.pathname === "/api/health") return json({ version: "1.10.0" });
       if (url.pathname === "/api/codebase-status") return json({ indexed: false });
       if (url.pathname === "/api/ai/status") return json({ providers: [] });
       if (url.pathname === "/api/connect") {
