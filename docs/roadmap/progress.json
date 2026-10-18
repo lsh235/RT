@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.14.0",
-  "current_stage": "R09",
+  "current_version": "1.15.0",
+  "current_stage": "R10",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 29
+    "started_rounds": 30
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -246,13 +246,14 @@
           "resolution": "Coordinator made browser/package smoke checks version-aware; independent QA reran the full browser and package checks successfully."
         }
       ],
-      "acceptance_commit": null,
-      "implementation_commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506"
+      "acceptance_commit": "5ffb1b3559f01ecded86eff49a4f57aaf047026f",
+      "implementation_commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506",
+      "tag": "v1.14.0"
     },
     {
       "stage": "R10",
       "version": "1.15.0",
-      "status": "pending",
+      "status": "in_progress",
       "owner_roles": [
         "A",
         "D",
@@ -261,9 +262,16 @@
       ],
       "required_gates": "docs/acceptance/v1.15.0.md",
       "fix_rounds_used": 0,
-      "evidence": [],
+      "evidence": [
+        "docs/acceptance/v1.15.0.md"
+      ],
       "commit": null,
-      "blockers": []
+      "blockers": [
+        "Implementation and independent QA are in progress; no R10 gate is yet accepted."
+      ],
+      "implementation_commit": null,
+      "acceptance_commit": null,
+      "round_log": []
     },
     {
       "stage": "R11",
@@ -300,55 +308,55 @@
   ],
   "current_gates": [
     {
-      "id": "candidate-and-time-budgets",
+      "id": "external-profile-runtime-example",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "deterministic-candidate-search",
+      "id": "context-bundle-identity-dedup-token-budget",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "train-validation-isolation",
+      "id": "experiment-evidence-fingerprint-preservation",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "baseline-retention-on-validation",
+      "id": "secret-free-doctor-diagnostics",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "per-query-known-relevant-miss-diagnostics",
+      "id": "bounded-runtime-measurements",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "reproducible-owner-scoped-run-snapshot",
+      "id": "sqlite-backup-restore-preservation",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
-      "id": "live-browser-package-and-regression",
+      "id": "regression-install-docs-preservation",
       "required": true,
-      "status": "PASS",
-      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.15.0.md"
     },
     {
       "id": "sourced-quality-evaluation-readiness",
       "required": false,
       "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.13.0.md; no permission-cleared representative dataset available"
+      "evidence": "No permission-cleared representative dataset has been received."
     }
   ],
-  "completed_commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506",
+  "completed_commit": "5ffb1b3559f01ecded86eff49a4f57aaf047026f",
   "remaining_blockers": [
     "Third-party redistribution rights for the bundled sample remain unresolved; the user said separate permission evidence can be provided, but no evidence has been received or verified. Do not bundle new third-party sample content; reassess this asset for final public release.",
     "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the R12 sourced-quality gate remains NOT RUN and final outcome remains NO-GO unless this evidence is supplied and evaluated.",
