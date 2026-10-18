@@ -83,6 +83,9 @@ const state = {
   profileVersions: [], quickstart: null, quickstartSampleIndex: 0,
   manualDocumentIndex: null,
   manualDocumentFromLocator: false,
+  tuneMisses: null,
+  connectionGeneration: 0,
+  connectionAttemptInProgress: false,
   locatorRequestId: 0,
   informationNeedPreviewGeneration: 0,
 };
@@ -367,6 +370,155 @@ function updateManualDocumentActions() {
   $("#locate-document-button").disabled = !state.connected || !state.conceptId || !$("#locate-document-text").value.trim();
 }
 
+function tuneMissConceptScope(concept) {
+  const settings = concept?.settings || {};
+  const corpus = concept?.corpus || {};
+  return JSON.stringify({
+    id: String(concept?.id || ""), name: String(concept?.name || "").trim(), description: String(concept?.description || ""),
+    aliases: Array.isArray(concept?.aliases) ? concept.aliases : [],
+    related: Array.isArray(concept?.related) ? concept.related : [],
+    excluded_terms: Array.isArray(concept?.excluded_terms) ? concept.excluded_terms : [],
+    corpus: { index: String(corpus.index || "").trim(), title_field: String(corpus.title_field || "").trim(), text_fields: corpus.text_fields || [], filter_fields: corpus.filter_fields || [] },
+    filters: Array.isArray(concept?.filters) ? concept.filters : [],
+    settings: {
+      mode: String(settings.mode || "bm25").toLowerCase(), size: Number(settings.size), candidate_size: Number(settings.candidate_size),
+      concept_weight: Number(settings.concept_weight), related_weight: Number(settings.related_weight), field_boosts: settings.field_boosts || {},
+    },
+    queries: (Array.isArray(concept?.queries) ? concept.queries : []).map((query) => {
+      const informationNeed = String(query?.information_need || "").trim().replace(/\s+/g, " ");
+      return { id: String(query?.id || "").trim(), query: String(query?.query || "").trim(), split: String(query?.split || "train"), ...(informationNeed ? { information_need: informationNeed } : {}) };
+    }),
+  });
+}
+
+function tuneMissScopeCurrent() {
+  const report = state.tuneMisses;
+  if (!report || state.connectionAttemptInProgress) return false;
+  try {
+    const currentScope = tuneMissConceptScope(collectConcept());
+    return currentScope === report.inputConceptScope
+      && currentScope === report.requestConceptScope
+      && state.conceptId === report.conceptId
+      && $("#saved-concepts").value === report.savedConceptSelection
+      && state.connectionGeneration === report.connectionGeneration;
+  } catch { return false; }
+}
+
+function refreshTuneMissHandoffs() {
+  const enabled = tuneMissScopeCurrent();
+  $$(".tune-miss-handoff").forEach((button) => { button.disabled = !enabled; });
+}
+
+function advanceConnectionGeneration() {
+  state.connectionGeneration += 1;
+  refreshTuneMissHandoffs();
+}
+
+function renderTuneMisses(result, sentConcept, connectionGeneration) {
+  const input = result?.input_snapshot;
+  const output = result?.output_snapshot;
+  const inputConcept = input?.concept;
+  const inputJudgments = input?.judgments;
+  const savedQueries = inputConcept?.queries;
+  const settings = result?.settings;
+  const k = Number(settings?.size);
+  const savedQueryIds = Array.isArray(savedQueries) ? savedQueries.map((query) => String(query?.id ?? "")) : [];
+  const savedQueryIdSet = new Set(savedQueryIds);
+  const querySnapshotValid = Array.isArray(savedQueries)
+    && savedQueries.every((query) => query && query.id != null && ["train", "validation"].includes(query.split))
+    && savedQueryIdSet.size === savedQueryIds.length
+    && Array.isArray(inputJudgments)
+    && !inputJudgments.some((judgment) => judgment && Number.isInteger(judgment.rating) && judgment.rating >= 1 && judgment.rating <= 3
+      && (judgment.query_id == null || !savedQueryIdSet.has(String(judgment.query_id))));
+  const commonValid = inputConcept && typeof inputConcept === "object" && !Array.isArray(inputConcept)
+    && querySnapshotValid && Number.isInteger(k) && k > 0
+    && !(Number(input?.judgments_truncated_count) > 0) && !(Number(result?.judged_count) > inputJudgments.length)
+    && !result?.output_snapshot_truncated;
+  state.tuneMisses = commonValid ? {
+    inputConceptScope: tuneMissConceptScope(inputConcept), requestConceptScope: tuneMissConceptScope(sentConcept),
+    conceptId: sentConcept.id || null, savedConceptSelection: $("#saved-concepts").value,
+    connectionGeneration,
+  } : null;
+  const split = (label, key, available) => {
+    const savedLaneQueryIds = new Set((Array.isArray(savedQueries) ? savedQueries : []).filter((query) => query && query.id != null && query.split === key).map((query) => String(query.id)));
+    const lanePositiveLabels = Array.isArray(inputJudgments) ? inputJudgments.filter((judgment) => judgment && judgment.query_id != null
+      && savedLaneQueryIds.has(String(judgment.query_id)) && Number.isInteger(judgment.rating) && judgment.rating >= 1 && judgment.rating <= 3) : [];
+    const nonEmptyIdentity = (value) => typeof value === "string" && value.trim().length > 0;
+    if (lanePositiveLabels.some((judgment) => !nonEmptyIdentity(judgment.document_index) || !nonEmptyIdentity(judgment.document_id))) {
+      return `<section class="tune-misses-lane"><h4>${label}</h4><p class="tune-misses-status">긍정 평가 대상의 인덱스 또는 문서 ID가 비어 있어 누락 여부를 판정하지 않았습니다.</p></section>`;
+    }
+    if (!available) {
+      const hasPositiveTargets = lanePositiveLabels.length > 0;
+      const status = commonValid && !hasPositiveTargets
+        ? `긍정 평가가 없어 아직 비교할 대상이 없습니다. ${key === "validation" ? "검증용 결과 스냅샷도 없습니다." : "결과 스냅샷을 사용할 수 없습니다."}`
+        : key === "validation" ? "검증용 스냅샷을 사용할 수 없어 누락 대상을 판정하지 않았습니다." : "학습용 스냅샷이 없거나 형식이 올바르지 않아 누락 대상을 판정하지 않았습니다.";
+      return `<section class="tune-misses-lane"><h4>${label}</h4><p class="tune-misses-status">${status}</p></section>`;
+    }
+    const baseline = output[key].baseline;
+    const tuned = output[key].tuned;
+    const judgedQueryIds = new Set(inputJudgments.filter((judgment) => judgment && judgment.query_id != null).map((judgment) => String(judgment.query_id)));
+    const laneQueries = savedQueries.filter((query) => query && query.id != null && query.split === key && judgedQueryIds.has(String(query.id)));
+    const queryIds = [...new Set(laneQueries.map((query) => String(query.id)))];
+    if (!queryIds.length) return `<section class="tune-misses-lane"><h4>${label}</h4><p class="tune-misses-status">긍정 평가가 없어 아직 누락 대상을 비교할 수 없습니다. ${key === "validation" ? "검증용으로 저장된 평가 질의가 없어 결과 스냅샷도 없습니다." : "학습용으로 저장된 평가 질의가 없어 결과 스냅샷도 없습니다."}</p></section>`;
+    const validRows = (rows) => rows && typeof rows === "object" && !Array.isArray(rows)
+      && Object.values(rows).every((list) => Array.isArray(list) && list.every((row) => row && Number.isInteger(row.rank) && row.rank > 0 && row.index != null && row.id != null));
+    if (!validRows(baseline) || !validRows(tuned)) return `<section class="tune-misses-lane"><h4>${label}</h4><p class="tune-misses-status">스냅샷의 순위 행 형식이 올바르지 않아 누락 대상을 판정하지 않았습니다.</p></section>`;
+    if (queryIds.some((qid) => !Object.prototype.hasOwnProperty.call(baseline, qid) || !Object.prototype.hasOwnProperty.call(tuned, qid))) {
+      return `<section class="tune-misses-lane"><h4>${label}</h4><p class="tune-misses-status">${label} 질의의 기본 또는 조정 순위 기록이 빠져 있어 누락 대상을 판정하지 않았습니다.</p></section>`;
+    }
+    const queryById = new Map(laneQueries.map((query) => [String(query.id), query]));
+    const laneQueryIds = new Set(queryIds);
+    const judgments = inputJudgments.filter((j) => j && j.query_id != null && laneQueryIds.has(String(j.query_id)) && j.document_index != null && j.document_id != null && Number.isInteger(j.rating) && j.rating >= 1 && j.rating <= 3);
+    if (!judgments.length) return `<section class="tune-misses-lane"><h4>${label} · 상위 ${k}개</h4><p class="tune-misses-status">긍정 평가가 없어 아직 비교할 대상이 없습니다. 누락 여부를 확인하려면 이 구분에 저장된 질의에서 문서에 1–3점을 평가하세요.</p></section>`;
+    const targets = new Map();
+    for (const j of judgments) {
+      const key = JSON.stringify([String(j.query_id), String(j.document_index), String(j.document_id)]);
+      const prior = targets.get(key);
+      if (!prior || Number(j.rating) > Number(prior.rating)) targets.set(key, j);
+    }
+    const misses = [];
+    for (const [identity, judgment] of targets) {
+      const qid = String(judgment.query_id);
+      const matches = (rows) => rows[qid].find((row) => JSON.stringify([qid, String(row.index), String(row.id)]) === identity);
+      if (matches(tuned)?.rank <= k) continue;
+      misses.push({ judgment, baseline: matches(baseline) });
+    }
+    const shown = misses.slice(0, 20);
+    const handoffEnabled = tuneMissScopeCurrent();
+    const grouped = new Map();
+    for (const item of misses) {
+      const qid = String(item.judgment.query_id);
+      if (!grouped.has(qid)) grouped.set(qid, []);
+      grouped.get(qid).push(item);
+    }
+    const shownItems = new Set(shown);
+    const content = shown.length ? `<div class="tune-misses-queries">${[...grouped].map(([qid, items]) => {
+      const visibleItems = items.filter((item) => shownItems.has(item));
+      if (!visibleItems.length) return "";
+      const query = queryById.get(qid);
+      return `<section class="tune-misses-query" data-query-id="${escapeHtml(qid)}"><h5>${escapeHtml(qid)} · ${escapeHtml(query?.query || "저장 질의")} · 누락 ${items.length}개${visibleItems.length < items.length ? ` · ${visibleItems.length}개 표시` : ""}</h5><ul class="tune-misses-list">${visibleItems.map(({ judgment, baseline: base }) => `<li data-testid="positive-target-miss"><div><strong>질의 ${escapeHtml(judgment.query_id)}</strong><span>인덱스 ${escapeHtml(judgment.document_index)} · 문서 ${escapeHtml(judgment.document_id)}</span><small>사람이 기록한 긍정 판단 ${Number(judgment.rating)}점 · ${base ? `기본 순위 ${base.rank}` : `저장된 기본 상위 ${k}개에 없음`} · 조정 결과 상위 ${k}개에 없음</small></div><button type="button" data-testid="positive-target-handoff" class="button button-secondary button-small tune-miss-handoff" data-query-id="${escapeHtml(judgment.query_id)}" data-document-index="${escapeHtml(judgment.document_index)}" data-document-id="${escapeHtml(judgment.document_id)}" ${handoffEnabled ? "" : "disabled"}>정확한 문서 진단으로 전달</button></li>`).join("")}</ul></section>`;
+    }).join("")}</div>` : `<p class="tune-misses-status">긍정 판단 대상 ${targets.size}개를 확인했으며, 저장된 조정 결과 상위 ${k}개에서 빠진 대상은 없습니다.</p>`;
+    return `<section class="tune-misses-lane"><h4>${label} · 상위 ${k}개</h4>${content}${misses.length > 20 ? `<p class="tune-misses-status">그 밖의 누락 대상 ${misses.length - 20}개는 표시하지 않았습니다.</p>` : ""}</section>`;
+  };
+  const validationAvailable = commonValid && output?.validation && typeof output.validation === "object" && !Array.isArray(output.validation);
+  const trainAvailable = commonValid && output?.train && typeof output.train === "object" && !Array.isArray(output.train);
+  const train = split("학습용", "train", trainAvailable);
+  const validation = validationAvailable ? split("검증용", "validation", true) : split("검증용", "validation", false);
+  return `<section class="tune-misses" id="tune-positive-target-misses"><h3>조정 후 상위 결과에서 빠진 긍정 판단 문서</h3><p>저장된 질의 중 각 학습/검증 구분에 속한 질의만 따로 확인합니다. 사람이 긍정(1–3점)으로 평가한 문서가 저장된 조정 결과 상위 ${commonValid ? k : "설정"}개에 있는지 보여줍니다. 이 기록에서 빠졌다는 뜻이며, 인덱스에 문서가 없거나 전체 재현율이 완전하거나 답변이 좋다는 뜻은 아닙니다. 검증용 평가는 설정 조정에 사용되지 않은 별도 확인입니다.</p>${train}${validation}</section>`;
+}
+
+function handoffTuneMiss(button) {
+  if (!tuneMissScopeCurrent()) { button.disabled = true; return; }
+  const queryId = button.dataset.queryId;
+  if (![...$("#manual-query-id").options].some((option) => option.value === queryId)) return;
+  state.manualDocumentIndex = button.dataset.documentIndex;
+  state.manualDocumentFromLocator = true;
+  $("#manual-document-id").value = button.dataset.documentId;
+  $("#manual-query-id").value = queryId;
+  updateManualDocumentActions();
+  showToast("문서 ID와 저장 질의를 입력했습니다. 읽기 전용 진단은 직접 실행하세요.");
+}
+
 function clearDocumentLocatorState() {
   state.locatorRequestId += 1;
   state.manualDocumentIndex = null;
@@ -429,6 +581,13 @@ function populateIndexSuggestions(indices) {
 }
 
 async function connect() {
+  if (state.connectionAttemptInProgress) return;
+  state.connectionAttemptInProgress = true;
+  const button = $("#connect-button");
+  const refreshButton = $("#refresh-indices");
+  button.disabled = true;
+  refreshButton.disabled = true;
+  advanceConnectionGeneration();
   clearDocumentLocatorState();
   state.canImportSample = false;
   renderSampleOnboarding();
@@ -438,8 +597,6 @@ async function connect() {
   state.connectedIndexExists = false;
   renderSearchReadiness();
   updateModeComparisonGroupAction();
-  const button = $("#connect-button");
-  button.disabled = true;
   button.innerHTML = '<span class="spinner"></span> 연결 중';
   setConnectionStatus("idle", "Elasticsearch 확인 중");
   $("#cluster-summary").classList.add("hidden");
@@ -491,8 +648,11 @@ async function connect() {
     $("#sample-status").className = "sample-status";
     showToast(error.message, true);
   } finally {
+    state.connectionAttemptInProgress = false;
+    advanceConnectionGeneration();
     updateModeComparisonGroupAction();
     button.disabled = false;
+    refreshButton.disabled = false;
     button.innerHTML = '<span class="button-icon">↗</span> 연결 확인';
   }
 }
@@ -2170,6 +2330,7 @@ function applyTunedSettings(settings = {}) {
   $("#concept-field-boosts").replaceChildren();
   renderConceptFieldBoosts();
   showToast("조정한 설정을 입력란에 반영했습니다.");
+  refreshTuneMissHandoffs();
 }
 
 function chooseQuery() {
@@ -3176,7 +3337,7 @@ async function fetchManualDocument() {
 }
 
 async function diagnoseManualDocument() {
-  const id = $("#manual-document-id").value.trim();
+  const id = state.manualDocumentFromLocator ? $("#manual-document-id").value : $("#manual-document-id").value.trim();
   const queryId = $("#manual-query-id").value;
   const button = $("#diagnose-manual-document");
   if (!state.connected || !state.conceptId) return showToast("Elasticsearch에 연결하고 개념을 저장한 뒤 확인하세요.", true);
@@ -3231,6 +3392,7 @@ async function runConceptTune() {
   const concept = collectConcept();
   if (!state.connected) return;
   if (!state.conceptId) return showToast("튜닝하기 전에 개념을 저장하세요.", true);
+  const requestConnectionGeneration = state.connectionGeneration;
   const button = $("#concept-tune"); button.disabled = true;
   $("#concept-tune-results").innerHTML = '<div class="loading-inline"><i class="spinner"></i> 평가 자료로 설정을 비교하고 있습니다.</div>';
   try {
@@ -3244,7 +3406,8 @@ async function runConceptTune() {
     const plain = result.plain_summary || {};
     const humanSummary = `<section class="plain-outcome"><h4>${escapeHtml(plain.headline || "평가한 문서를 기준으로 설정을 비교했습니다.")}</h4>${(plain.details || []).map((detail) => `<p>${escapeHtml(detail)}</p>`).join("")}${(plain.caveats || []).map((caveat) => `<p class="outcome-caveat">${escapeHtml(caveat)}</p>`).join("")}</section>`;
     const numericDetails = `<details class="numeric-outcomes"><summary>상세 수치와 질의별 비교 보기</summary><div class="tune-metric-grid"><div><span>학습용 · 조정 전</span><p>${metricSummary(result.baseline)}</p></div><div><span>학습용 · 조정 후</span><p>${metricSummary(result.tuned)}</p></div>${validationHtml}</div><p class="helper-text">평가 ${Number(result.judged_count || 0)}건 · 명시적 미평가 ${Number(result.explicit_unjudged_count || 0)}건 · 결과 내 미평가 ${Number(result.unjudged_retrieved_count || 0)}건 · 따로 고정 ${Number(result.pinned_count || 0)}건</p>${queryDetails}</details>`;
-    $("#concept-tune-results").innerHTML = `<div class="concept-tune-result card"><div class="concept-section-heading"><div><h3>설정 비교 결과</h3><p>조정은 학습용 평가 자료만 사용했습니다. 다른 질의 평가는 별도로 확인합니다.</p></div><button type="button" class="button button-primary button-small apply-tuned-settings">워크벤치에 이 설정 적용</button></div>${humanSummary}${numericDetails}<details><summary>적용 설정</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.settings || {}, null, 2))}</pre></details>${warningHtml}</div>`;
+    const missedTargets = renderTuneMisses(result, concept, requestConnectionGeneration);
+    $("#concept-tune-results").innerHTML = `<div class="concept-tune-result card"><div class="concept-section-heading"><div><h3>설정 비교 결과</h3><p>조정은 학습용 평가 자료만 사용했습니다. 다른 질의 평가는 별도로 확인합니다.</p></div><button type="button" class="button button-primary button-small apply-tuned-settings">워크벤치에 이 설정 적용</button></div>${humanSummary}${numericDetails}${missedTargets}<details><summary>적용 설정</summary><pre class="explain-box">${escapeHtml(JSON.stringify(result.settings || {}, null, 2))}</pre></details>${warningHtml}</div>`;
     await loadConceptRuns();
   } catch (error) {
     const detail = /positive|relevant|grade|label|judg/i.test(error.message) ? "설정 비교를 시작하려면 학습용 질의 결과에서 적어도 한 문서를 ‘조금 관련’ 이상으로 평가해 주세요. 0점은 무관, ‘미평가’는 아직 판단하지 않은 상태입니다." : error.message;
@@ -4001,7 +4164,12 @@ function init() {
     saveNonSecretPreferences();
     resetAiIfScopeChanged();
   });
+  $("#auth-type").addEventListener("change", advanceConnectionGeneration);
   ["#es-user", "#es-password", "#es-api-key"].forEach((selector) => $(selector).addEventListener("change", () => { state.aiConnectionEpoch = Number(state.aiConnectionEpoch || 0) + 1; resetAiIfScopeChanged(); }));
+  ["#es-url", "#es-user", "#es-password", "#es-api-key"].forEach((selector) => {
+    $(selector).addEventListener("input", advanceConnectionGeneration);
+    $(selector).addEventListener("change", advanceConnectionGeneration);
+  });
   $("#connect-button").addEventListener("click", connect);
   $("#refresh-indices").addEventListener("click", connect);
   $("#load-sample-button").addEventListener("click", loadSample);
@@ -4095,6 +4263,7 @@ function init() {
     $("#index-name").value = index; saveNonSecretPreferences(); $("#concept-index-badge").textContent = index;
     Promise.resolve(changedIndex && state.connected ? loadCorpusSchema() : null).then(async () => {
       populateConcept(concept);
+      refreshTuneMissHandoffs();
       await loadProfileVersions();
       showToast(`‘${concept.name}’ 개념을 불러왔습니다.`);
     });
@@ -4102,8 +4271,8 @@ function init() {
   $("#related-terms").addEventListener("click", (event) => { const button = event.target.closest(".related-remove"); if (button) { button.closest(".related-row").remove(); clearVectorCandidatePool("개념 표현이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); } });
   $("#related-terms").addEventListener("input", (event) => { if (event.target.matches(".related-term, .related-relation, .related-weight")) event.target.setAttribute("aria-label", event.target.closest(".related-row").querySelector(".related-term").value || "함께 볼 표현"); });
   $("#add-related-term").addEventListener("click", () => { addRelatedTerm(); clearVectorCandidatePool("개념 표현이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); });
-  $("#add-concept-query").addEventListener("click", () => { addConceptQuery(); clearVectorCandidatePool("저장 질의가 바뀌었습니다. 같은 질의로 새 BM25 비교를 실행하세요."); });
-  $("#concept-queries").addEventListener("click", (event) => { const button = event.target.closest(".query-remove"); if (button) { button.closest(".concept-query-row").remove(); clearVectorCandidatePool("저장 질의가 바뀌었습니다. 같은 질의로 새 BM25 비교를 실행하세요."); refreshQueryChoices(); refreshInformationNeedSuggestions(); } });
+  $("#add-concept-query").addEventListener("click", () => { addConceptQuery(); clearVectorCandidatePool("저장 질의가 바뀌었습니다. 같은 질의로 새 BM25 비교를 실행하세요."); refreshTuneMissHandoffs(); });
+  $("#concept-queries").addEventListener("click", (event) => { const button = event.target.closest(".query-remove"); if (button) { button.closest(".concept-query-row").remove(); clearVectorCandidatePool("저장 질의가 바뀌었습니다. 같은 질의로 새 BM25 비교를 실행하세요."); refreshQueryChoices(); refreshInformationNeedSuggestions(); refreshTuneMissHandoffs(); } });
   $("#concept-queries").addEventListener("input", (event) => {
     refreshQueryChoices();
     if (event.target.matches(".saved-query-information-need")) refreshInformationNeedSuggestions();
@@ -4153,8 +4322,10 @@ function init() {
   $("#auth-type").addEventListener("change", clearDocumentLocatorState);
   $("#auth-type").addEventListener("change", () => clearVectorCandidatePool("연결 설정이 바뀌었습니다. 다시 연결하고 BM25 비교를 실행하세요."));
   $("#index-name").addEventListener("input", clearDocumentLocatorState);
+  $("#index-name").addEventListener("input", refreshTuneMissHandoffs);
   $("#index-name").addEventListener("input", () => clearVectorCandidatePool("인덱스가 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."));
   $("#index-name").addEventListener("change", clearDocumentLocatorState);
+  $("#index-name").addEventListener("change", refreshTuneMissHandoffs);
   $("#index-name").addEventListener("change", () => clearVectorCandidatePool("인덱스가 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."));
   $("#concept-title-field").addEventListener("change", clearDocumentLocatorState);
   $("#concept-text-fields").addEventListener("change", clearDocumentLocatorState);
@@ -4179,7 +4350,10 @@ function init() {
     clearVectorCandidatePool("필터가 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요.");
   });
   $("#concept-tune").addEventListener("click", runConceptTune);
+  $("#saved-concepts").addEventListener("change", refreshTuneMissHandoffs);
   $("#concept-tune-results").addEventListener("click", async (event) => {
+    const handoff = event.target.closest(".tune-miss-handoff");
+    if (handoff) { handoffTuneMiss(handoff); return; }
     const button = event.target.closest(".apply-tuned-settings"); if (!button) return;
     const settings = state.tunedSettings;
     if (!settings) return showToast("적용할 조정 설정이 없습니다.", true);
@@ -4188,8 +4362,8 @@ function init() {
     if ($("#concept-query").value.trim() || $("#concept-query-select").value) await runConceptPreview();
     else showToast("설정을 저장했습니다. 질의를 선택해 다시 비교하세요.");
   });
-  $("#concept-editor").addEventListener("input", () => { clearVectorCandidatePool("개념 설정이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); updateInformationNeedPreviewAction(); updateTuneReadiness(); resetAiIfScopeChanged(); });
-  $("#concept-editor").addEventListener("change", () => { clearVectorCandidatePool("개념 설정이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); updateInformationNeedPreviewAction(); updateTuneReadiness(); resetAiIfScopeChanged(); });
+  $("#concept-editor").addEventListener("input", () => { clearVectorCandidatePool("개념 설정이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); updateInformationNeedPreviewAction(); updateTuneReadiness(); resetAiIfScopeChanged(); refreshTuneMissHandoffs(); });
+  $("#concept-editor").addEventListener("change", () => { clearVectorCandidatePool("개념 설정이 바뀌었습니다. 새 BM25 비교 후 벡터 후보를 다시 불러오세요."); updateInformationNeedPreviewAction(); updateTuneReadiness(); resetAiIfScopeChanged(); refreshTuneMissHandoffs(); });
   ["#es-url", "#auth-type", "#es-user", "#es-password", "#es-api-key"].forEach((selector) => {
     const input = $(selector);
     ["input", "change"].forEach((eventName) => input?.addEventListener(eventName, () => {
