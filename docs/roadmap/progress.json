@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.13.0",
-  "current_stage": "R08",
+  "current_version": "1.14.0",
+  "current_stage": "R09",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,7 +35,7 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 26
+    "started_rounds": 29
   },
   "license": {
     "project_code": "Apache-2.0",
@@ -209,12 +209,13 @@
       "blockers": [
         "Permission evidence for third-party sample redistribution has been offered but not received or verified; no such material may be bundled.",
         "Representative permission-cleared public qrels/human judgments are not yet available; the sourced-quality evaluation gate remains NOT RUN."
-      ]
+      ],
+      "acceptance_commit": "a377db43456b26057d7b66b029c2ceb0c441867a"
     },
     {
       "stage": "R09",
       "version": "1.14.0",
-      "status": "pending",
+      "status": "complete",
       "owner_roles": [
         "D",
         "B",
@@ -222,10 +223,31 @@
         "F"
       ],
       "required_gates": "docs/acceptance/v1.14.0.md",
-      "fix_rounds_used": 0,
-      "evidence": [],
-      "commit": null,
-      "blockers": []
+      "fix_rounds_used": 2,
+      "evidence": [
+        "docs/acceptance/v1.14.0.md",
+        "docs/acceptance/v1.14.0-independent-qa.md"
+      ],
+      "commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506",
+      "blockers": [],
+      "round_log": [
+        {
+          "round": 1,
+          "kind": "integration_contract_correction",
+          "status": "complete",
+          "finding": "Backend output identifiers/reasons/diagnostic fields diverged from the fixed frontend/API acceptance contract.",
+          "resolution": "Backend response and frontend rendering now match the fixed R09 contract; owner focused and mock-browser checks passed."
+        },
+        {
+          "round": 2,
+          "kind": "version_bump_smoke_compatibility",
+          "status": "complete",
+          "finding": "Browser and installed-wheel smoke checks still asserted v1.13.0 after the R09 version bump.",
+          "resolution": "Coordinator made browser/package smoke checks version-aware; independent QA reran the full browser and package checks successfully."
+        }
+      ],
+      "acceptance_commit": null,
+      "implementation_commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506"
     },
     {
       "stage": "R10",
@@ -278,46 +300,46 @@
   ],
   "current_gates": [
     {
-      "id": "versioned-query-qrels-io",
+      "id": "candidate-and-time-budgets",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "dataset-provenance-and-immutability",
+      "id": "deterministic-candidate-search",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "leakage-aware-three-way-splits",
+      "id": "train-validation-isolation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "judgment-semantics-and-metrics",
+      "id": "baseline-retention-on-validation",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "independent-reference-metrics",
+      "id": "per-query-known-relevant-miss-diagnostics",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "per-query-regressions-and-misses",
+      "id": "reproducible-owner-scoped-run-snapshot",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
-      "id": "browser-api-storage-compatibility",
+      "id": "live-browser-package-and-regression",
       "required": true,
       "status": "PASS",
-      "evidence": "docs/acceptance/v1.13.0-independent-qa.md"
+      "evidence": "docs/acceptance/v1.14.0-independent-qa.md"
     },
     {
       "id": "sourced-quality-evaluation-readiness",
@@ -326,13 +348,11 @@
       "evidence": "docs/acceptance/v1.13.0.md; no permission-cleared representative dataset available"
     }
   ],
-  "completed_commit": "8b50be380f0c790c549a12a5181aa68d807e189d",
+  "completed_commit": "1b88c1792bd9c4212373b29b9fd7bc1b76cc8506",
   "remaining_blockers": [
-    "Redistribution rights for the bundled 25-document gRPC sample remain UNRESOLVED. The asset cites public github.com/grpc/grpc/issues pages; the reviewed GitHub Terms describe viewing/forking public content through GitHub, while repository licensing guidance and the grpc code LICENSE do not establish that issue text can be redistributed under this project license outside GitHub. The user indicated separate permission evidence can be supplied, but no evidence has been received or verified yet. Recheck with the content owners or remove/replace the data before public release.",
-    "GitHub-hosted CI has not run; verify after the final authorized branch push.",
-    "Initial hashes for three pre-existing untracked user files were not captured, so byte-for-byte baseline comparison is unavailable.",
-    "The isolated independent Elasticsearch run had no source corpus to fingerprint; source-corpus preservation is therefore NOT RUN there.",
-    "The R12 sourced-quality-evaluation-readiness gate is NOT RUN: no permission-cleared, representative corpus and qrels are available."
+    "Third-party redistribution rights for the bundled sample remain unresolved; the user said separate permission evidence can be provided, but no evidence has been received or verified. Do not bundle new third-party sample content; reassess this asset for final public release.",
+    "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the R12 sourced-quality gate remains NOT RUN and final outcome remains NO-GO unless this evidence is supplied and evaluated.",
+    "GitHub-hosted CI has not run; inspect it after the one authorized final branch push."
   ],
   "push": {
     "attempted": false,
