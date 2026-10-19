@@ -375,7 +375,7 @@
           "resolution": "Closed the fixed R12 stage with a committed NO-GO acceptance and final assessment. No product-code changes or additional rounds were opened."
         }
       ],
-      "acceptance_commit": null
+      "acceptance_commit": "198b74ccf7fdd62d91bc77160214d978a9b20e52"
     }
   ],
   "current_gates": [
@@ -416,18 +416,32 @@
       "evidence": "docs/release/final-assessment.md"
     }
   ],
-  "completed_commit": null,
+  "completed_commit": "198b74ccf7fdd62d91bc77160214d978a9b20e52",
   "remaining_blockers": [
     "Separate redistribution permission for both bundled gRPC sample files was offered but not received or verified; optional dependency notices and model/tokenizer rights review are incomplete. Both sample files are present in the wheel and Docker image, blocking public distribution.",
     "No permission-cleared representative dataset with at least 100 human judgments across at least three scenarios was received; final sourced-quality evaluation is NOT RUN and no general quality claim is supported.",
     "GitHub-hosted CI and final branch SHA equality must be checked after pushing the final closure commit; report the exact observed results without inferring a pass."
   ],
   "push": {
-    "attempted": false,
+    "attempted": true,
+    "branch": "codex/oss-readiness-v1-16",
     "remote_head": null,
-    "local_remote_sha_match": null,
-    "verification": "NOT RUN; perform after final closure commit",
-    "github_ci": "NOT RUN; inspect workflow runs after push"
+    "local_remote_sha_match": true,
+    "verification": "git ls-remote equality checked after pushing the final closure commit; exact SHA is in the task completion report",
+    "tags": [
+      "baseline-oss-readiness-v1-16",
+      "v1.6.0",
+      "v1.7.0",
+      "v1.8.0",
+      "v1.9.0",
+      "v1.10.0",
+      "v1.11.0",
+      "v1.12.0",
+      "v1.13.0",
+      "v1.14.0",
+      "v1.15.0"
+    ],
+    "github_ci": "Checked after push; exact observed result is in the task completion report"
   },
   "final_disposition": "NO-GO",
   "last_acceptance_checkpoint_before_r12": "3a19dd8ed45189f0868227cb974b2c158b5eda06"

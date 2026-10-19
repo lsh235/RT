@@ -32,7 +32,7 @@ Every listed v1.6.0–v1.15.0 tag is an existing annotated task release tag. The
 | R10 | v1.15.0 | 9fb2ce615c4ea5ea7ec168c8faf64cf381160927 | 3ad25c13bb0cf6334a1bf36a6b54c841ce2c8c58 | Complete |
 | R11 | v1.16.0-rc.1 | 6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d | None | Technical/documentation checks passed within limits; overall NO-GO |
 | R11 acceptance | v1.16.0-rc.1 | 3a19dd8ed45189f0868227cb974b2c158b5eda06 | None | Independent evidence and blocking disposition committed |
-| R12 | v1.16.0 | Final closure commit is recorded in git history and the task completion report | None | Complete NO-GO; no stable or RC tag |
+| R12 | v1.16.0 | NO-GO acceptance and final report first committed as 198b74ccf7fdd62d91bc77160214d978a9b20e52; progress metadata closure follows | None | Complete NO-GO; no stable or RC tag |
 
 The existing baseline tag baseline-oss-readiness-v1-16 records the original starting HEAD and remains unchanged. No tag is created or moved by R12.
 
