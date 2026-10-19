@@ -28,7 +28,7 @@
   },
   "current_version": "1.16.0",
   "current_stage": "R12",
-  "overall_status": "in_progress",
+  "overall_status": "complete_no_go",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
   "round_policy": {
@@ -40,7 +40,9 @@
   "license": {
     "project_code": "Apache-2.0",
     "selected_by_user": true,
-    "third_party_sample_data_redistribution": "UNRESOLVED / NOT RUN"
+    "third_party_sample_data_redistribution": "UNRESOLVED / NOT RUN",
+    "separate_permission_evidence_offered_by_user": true,
+    "separate_permission_evidence_received_and_verified": false
   },
   "versions": [
     {
@@ -316,7 +318,7 @@
         "The wheel and Docker image contain both unresolved sample files; no v1.16.0-rc.1 tag or public distribution is permitted."
       ],
       "implementation_commit": "6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d",
-      "acceptance_commit": null,
+      "acceptance_commit": "3a19dd8ed45189f0868227cb974b2c158b5eda06",
       "tag": null,
       "round_log": [
         {
@@ -345,7 +347,7 @@
     {
       "stage": "R12",
       "version": "1.16.0",
-      "status": "in_progress",
+      "status": "complete",
       "owner_roles": [
         "F",
         "coordinator"
@@ -354,29 +356,33 @@
       "fix_rounds_used": 0,
       "evidence": [
         "docs/acceptance/v1.16.0.md",
-        "docs/release/final-assessment.md"
+        "docs/release/final-assessment.md",
+        "docs/acceptance/v1.16.0-independent-qa.md"
       ],
       "commit": null,
       "blockers": [
-        "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios was received; sourced-quality evaluation remains NOT RUN.",
-        "R11 sample redistribution and optional dependency/model rights gates remain unresolved; public distribution remains NO-GO."
+        "No permission-cleared representative dataset with at least 100 human-judged queries across at least three scenarios was received; sourced-quality evaluation remains NOT RUN.",
+        "Separate redistribution permission for both bundled gRPC Jira sample files was offered but not received or verified; the wheel and Docker image include them.",
+        "Optional dependency notice delivery and complete model/tokenizer artifact rights review remain incomplete.",
+        "GitHub-hosted CI status is checked only after the final branch push and must be reported against its exact commit."
       ],
       "round_log": [
         {
           "round": 1,
           "kind": "final_closure",
-          "status": "in_progress",
-          "finding": "R11 technical/documentation gates passed within their evidence limits, while required sample/dependency/model rights and representative sourced-quality evidence remain unresolved.",
-          "resolution": null
+          "status": "complete",
+          "finding": "R11 local technical and documentation checks passed within their stated limits. Sample/dependency/model rights and representative sourced-quality evidence remain unresolved.",
+          "resolution": "Closed the fixed R12 stage with a committed NO-GO acceptance and final assessment. No product-code changes or additional rounds were opened."
         }
-      ]
+      ],
+      "acceptance_commit": null
     }
   ],
   "current_gates": [
     {
       "id": "final-offline-browser-package-regression",
       "required": true,
-      "status": "NOT RUN",
+      "status": "PASS WITH LIMITS",
       "evidence": "docs/acceptance/v1.16.0.md"
     },
     {
@@ -389,30 +395,40 @@
       "id": "public-distribution-rights-clearance",
       "required": true,
       "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+      "evidence": "docs/acceptance/v1.16.0.md"
     },
     {
       "id": "final-version-and-document-alignment",
       "required": true,
-      "status": "IN PROGRESS",
+      "status": "PASS",
       "evidence": "docs/release/final-assessment.md"
     },
     {
       "id": "final-branch-push-and-remote-sha-equality",
       "required": true,
-      "status": "NOT RUN",
+      "status": "NOT RUN AT FINAL-COMMIT SNAPSHOT",
+      "evidence": "docs/release/final-assessment.md"
+    },
+    {
+      "id": "github-hosted-ci-on-final-branch",
+      "required": true,
+      "status": "NOT RUN AT FINAL-COMMIT SNAPSHOT",
       "evidence": "docs/release/final-assessment.md"
     }
   ],
-  "completed_commit": "6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d",
+  "completed_commit": null,
   "remaining_blockers": [
-    "Separate redistribution permission for both bundled gRPC sample files has not been received or verified; optional dependency notices and model/tokenizer rights review are incomplete. Their presence in the wheel and Docker image blocks public release.",
-    "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the final sourced-quality gate remains NOT RUN and overall outcome is NO-GO.",
-    "GitHub-hosted CI has not run; inspect it after the one authorized final branch push. Do not treat a not-yet-run workflow as PASS."
+    "Separate redistribution permission for both bundled gRPC sample files was offered but not received or verified; optional dependency notices and model/tokenizer rights review are incomplete. Both sample files are present in the wheel and Docker image, blocking public distribution.",
+    "No permission-cleared representative dataset with at least 100 human judgments across at least three scenarios was received; final sourced-quality evaluation is NOT RUN and no general quality claim is supported.",
+    "GitHub-hosted CI and final branch SHA equality must be checked after pushing the final closure commit; report the exact observed results without inferring a pass."
   ],
   "push": {
     "attempted": false,
     "remote_head": null,
-    "local_remote_sha_match": null
-  }
+    "local_remote_sha_match": null,
+    "verification": "NOT RUN; perform after final closure commit",
+    "github_ci": "NOT RUN; inspect workflow runs after push"
+  },
+  "final_disposition": "NO-GO",
+  "last_acceptance_checkpoint_before_r12": "3a19dd8ed45189f0868227cb974b2c158b5eda06"
 }
