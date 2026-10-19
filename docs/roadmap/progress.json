@@ -26,8 +26,8 @@
       "fallback": "source/read/rg inspection; claims remain bounded to inspected files"
     }
   },
-  "current_version": "1.16.0-rc.1",
-  "current_stage": "R11",
+  "current_version": "1.16.0",
+  "current_stage": "R12",
   "overall_status": "in_progress",
   "requested_agent_model": "gpt-6-luna",
   "observable_runtime_model": "UNVERIFIED",
@@ -35,12 +35,12 @@
     "initial_implementation_rounds_per_version": 1,
     "maximum_cumulative_fix_retest_rounds_per_version": 3,
     "maximum_total_rounds": 48,
-    "started_rounds": 33
+    "started_rounds": 36
   },
   "license": {
     "project_code": "Apache-2.0",
     "selected_by_user": true,
-    "third_party_sample_data_redistribution": "UNRESOLVED"
+    "third_party_sample_data_redistribution": "UNRESOLVED / NOT RUN"
   },
   "versions": [
     {
@@ -292,7 +292,7 @@
     {
       "stage": "R11",
       "version": "1.16.0-rc.1",
-      "status": "in_progress",
+      "status": "complete",
       "owner_roles": [
         "F",
         "A",
@@ -302,91 +302,113 @@
         "E"
       ],
       "required_gates": "docs/acceptance/v1.16.0-rc.1.md",
-      "fix_rounds_used": 0,
+      "fix_rounds_used": 2,
       "evidence": [
-        "docs/acceptance/v1.16.0-rc.1.md"
+        "docs/acceptance/v1.16.0-rc.1.md",
+        "docs/acceptance/v1.16.0-independent-qa.md",
+        "docs/release/third-party-asset-audit.md",
+        "docs/release/dependency-license-inventory.md"
       ],
-      "commit": null,
+      "commit": "6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d",
       "blockers": [
-        "Separate redistribution permission for the bundled gRPC Jira data files has not yet been received or verified; required R11 gate remains NOT RUN."
+        "Separate redistribution permission for both bundled gRPC Jira sample files was not received or verified; the required rights gate remains NOT RUN.",
+        "Optional dependency license/notice delivery and complete model/tokenizer artifact rights review remain incomplete.",
+        "The wheel and Docker image contain both unresolved sample files; no v1.16.0-rc.1 tag or public distribution is permitted."
       ],
-      "implementation_commit": null,
+      "implementation_commit": "6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d",
       "acceptance_commit": null,
       "tag": null,
       "round_log": [
         {
           "round": 1,
           "kind": "initial_implementation",
-          "status": "in_progress",
-          "finding": null,
-          "resolution": null
+          "status": "complete",
+          "finding": "Independent QA found that scripts/browser_smoke.mjs rejected the Python PEP 440 normalized prerelease version 1.16.0rc1.",
+          "resolution": "Opened one bounded fix/retest round; initial failure retained as R11-F1."
+        },
+        {
+          "round": 2,
+          "kind": "fix_retest",
+          "status": "complete",
+          "finding": "R11-F1: browser health-version validation rejected 1.16.0rc1.",
+          "resolution": "Version validation now accepts normalized Python prereleases; independent full browser suite passed."
+        },
+        {
+          "round": 3,
+          "kind": "fix_retest",
+          "status": "complete",
+          "finding": "R11-F2: repeated wheel and no-cache Docker builds have varying hashes, ZIP timestamps, pip cache and bytecode contents.",
+          "resolution": "Under the coordinator round-3 counter, two staged wheel builds matched byte-for-byte and two same-project, no-cache Docker builds matched image ID/config, all five RootFS layers, and saved archive on the tested host/toolchain. Independent QA also confirmed package smoke and artifact contents; scope is recorded in the QA report."
         }
       ]
     },
     {
       "stage": "R12",
       "version": "1.16.0",
-      "status": "pending",
+      "status": "in_progress",
       "owner_roles": [
         "F",
         "coordinator"
       ],
       "required_gates": "docs/acceptance/v1.16.0.md",
       "fix_rounds_used": 0,
-      "evidence": [],
+      "evidence": [
+        "docs/acceptance/v1.16.0.md",
+        "docs/release/final-assessment.md"
+      ],
       "commit": null,
-      "blockers": []
+      "blockers": [
+        "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios was received; sourced-quality evaluation remains NOT RUN.",
+        "R11 sample redistribution and optional dependency/model rights gates remain unresolved; public distribution remains NO-GO."
+      ],
+      "round_log": [
+        {
+          "round": 1,
+          "kind": "final_closure",
+          "status": "in_progress",
+          "finding": "R11 technical/documentation gates passed within their evidence limits, while required sample/dependency/model rights and representative sourced-quality evidence remain unresolved.",
+          "resolution": null
+        }
+      ]
     }
   ],
   "current_gates": [
     {
-      "id": "code-dependency-model-sample-rights-inventory",
+      "id": "final-offline-browser-package-regression",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0.md"
+    },
+    {
+      "id": "permission-cleared-sourced-quality-evaluation",
+      "required": true,
+      "status": "NOT RUN",
+      "evidence": "docs/acceptance/v1.16.0.md"
+    },
+    {
+      "id": "public-distribution-rights-clearance",
       "required": true,
       "status": "NOT RUN",
       "evidence": "docs/acceptance/v1.16.0-rc.1.md"
     },
     {
-      "id": "evidence-based-support-matrix",
+      "id": "final-version-and-document-alignment",
       "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+      "status": "IN PROGRESS",
+      "evidence": "docs/release/final-assessment.md"
     },
     {
-      "id": "loopback-docker-compose-install",
+      "id": "final-branch-push-and-remote-sha-equality",
       "required": true,
       "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
-    },
-    {
-      "id": "source-upgrade-migration-restore-docs",
-      "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
-    },
-    {
-      "id": "bilingual-user-contributor-security-docs",
-      "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
-    },
-    {
-      "id": "reproducible-package-dependency-locks",
-      "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
-    },
-    {
-      "id": "full-independent-regression-preservation",
-      "required": true,
-      "status": "NOT RUN",
-      "evidence": "docs/acceptance/v1.16.0-rc.1.md"
+      "evidence": "docs/release/final-assessment.md"
     }
   ],
-  "completed_commit": "3ad25c13bb0cf6334a1bf36a6b54c841ce2c8c58",
+  "completed_commit": "6b27b6f8eaa37bfe8fdd8fe5151799f0f78c678d",
   "remaining_blockers": [
-    "Third-party redistribution rights for the bundled sample remain unresolved; the user said separate permission evidence can be provided, but no evidence has been received or verified. Do not bundle new third-party sample content; reassess this asset for final public release.",
-    "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the R12 sourced-quality gate remains NOT RUN and final outcome remains NO-GO unless this evidence is supplied and evaluated.",
-    "GitHub-hosted CI has not run; inspect it after the one authorized final branch push."
+    "Separate redistribution permission for both bundled gRPC sample files has not been received or verified; optional dependency notices and model/tokenizer rights review are incomplete. Their presence in the wheel and Docker image blocks public release.",
+    "No permission-cleared representative dataset with at least 100 human-judged queries across three scenarios has been received; the final sourced-quality gate remains NOT RUN and overall outcome is NO-GO.",
+    "GitHub-hosted CI has not run; inspect it after the one authorized final branch push. Do not treat a not-yet-run workflow as PASS."
   ],
   "push": {
     "attempted": false,
