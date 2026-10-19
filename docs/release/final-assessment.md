@@ -49,7 +49,7 @@ The existing baseline tag baseline-oss-readiness-v1-16 records the original star
 | Support matrix | PASS WITH LIMIT | Independently exercised: Linux x86_64 WSL2, Python 3.12.3, Node 22.23.2/npm 10.9.8 with Chromium, Docker 29.7.2/Compose 5.5.0, Elasticsearch 9.5.5. Python 3.10 full suite, native Windows/macOS, alternate browser/ES versions, Docker Desktop/Podman, optional model/provider combinations, and production use are unverified. See docs/support-matrix.md. |
 | Sourced retrieval quality | NOT RUN | No permission-cleared representative dataset with at least 100 human judgments across at least three scenarios was provided. No final nDCG, Recall, MRR, judged coverage, uncertainty, p50/p95 latency, or improvement claim is available. The existing 25-document Jira sample is a regression fixture only. |
 | Public redistribution rights | NOT RUN — BLOCKING | Apache-2.0 is confirmed for project code. Separate redistribution permission for both included sample files was not received or verified. Optional dependency notices and full model/tokenizer artifact rights review are incomplete. |
-| GitHub-hosted CI | INITIAL FAILURE; FIX-ROUND-1 LOCAL RETEST PASS; FINAL RUN PENDING | [Run 39179221117](https://github.com/lsh235/RT/actions/runs/39179221117) failed on the first pushed closure head. The workflow/lock/test fixes passed independent local retests, including 19 live cases against disposable Elasticsearch. The final pushed head receives a separate hosted-CI run; the exact tested SHA and result are included in the task completion report. |
+| GitHub-hosted CI | PASS ON POST-FIX CODE CLOSURE | Initial run [39179221117](https://github.com/lsh235/RT/actions/runs/39179221117) exposed bounded failures. Follow-up [run 39180148064](https://github.com/lsh235/RT/actions/runs/39180148064) passed all four jobs on `70074317e96b0ca085c702239560b4f4014d508e`: Python 3.10, Python 3.12, browser, and disposable Elasticsearch. The local and remote branch SHAs matched immediately after push. Runner deprecation annotations were non-failing. Rights and sourced-quality blockers remain. |
 
 ## Code and product changes across the fixed plan
 
@@ -87,7 +87,7 @@ To reopen the final quality gate, provide permission-cleared human judgments for
 - Requested subagent model: gpt-6-luna.
 - Observable runtime model identity: UNVERIFIED.
 - Coordinator-owned final disposition: NO-GO.
-- The final pushed commit includes this assessment, the R12 acceptance report, and fix-round-1 CI corrections. The authorized branch and previously created task tags are pushed; local versus remote branch SHA equality and hosted CI are checked after push. Exact final SHA and GitHub Actions status are reported in the task completion message.
+- The post-fix code closure commit `70074317e96b0ca085c702239560b4f4014d508e` passed hosted CI and matched the remote branch SHA after push. A following documentation-only closure commit records those results; the task completion message reports the final pushed SHA and its Actions result.
 - No v1.16.0-rc.1 or v1.16.0 release tag is created. No PR, merge, GitHub Release, or force push is performed.
 
 정해진 반복 한도에서 필수 게이트를 충족하지 못해 NO-GO로 종료했다. 미충족 항목과 재개 조건을 기록했으며 추가 반복은 실행하지 않았다.
