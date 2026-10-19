@@ -299,6 +299,7 @@ class Cycle43PrivateVectorAcceptance(unittest.TestCase):
         with mock.patch.object(token_preview, "status", return_value=self.ready_tokenizer()), \
                 mock.patch.object(token_preview, "prepare", return_value=self.ready_tokenizer()), \
                 mock.patch.object(token_preview, "preview_input", side_effect=self.token_preview_stub), \
+                mock.patch.object(embeddings, "_fastembed_version", return_value="0.9.0-fixture"), \
                 mock.patch.object(embeddings, "embed_texts", side_effect=embed):
             status, synced = client.post("/api/knowledge/es-vector-sync", {"connection": self.connection,
                                                                             "allow_model_download": True,
@@ -334,7 +335,7 @@ class Cycle43PrivateVectorAcceptance(unittest.TestCase):
         self.assertEqual(field, {"type": "dense_vector", "dims": 1024, "index": True, "similarity": "cosine"})
         self.assertEqual(mapping["_meta"]["private_vector_recipe"], synced["vector_recipe"])
         self.assertIn("fastembed_version", synced["vector_recipe"])
-        self.assertTrue(synced["vector_recipe"]["fastembed_version"])
+        self.assertEqual(synced["vector_recipe"]["fastembed_version"], "0.9.0-fixture")
         self.assertIn("tokenizer", synced["vector_recipe"])
         self.assertIn("chunking_recipe", synced["vector_recipe"])
         self.assertEqual(synced["vector_recipe"]["chunking_recipe"]["context_tokens"], 512)

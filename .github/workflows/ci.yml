@@ -41,7 +41,7 @@ jobs:
       - run: python -m pip install --no-deps -e .
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
+      - run: PYTHON="$(command -v python)" npm run test:browser
 
   elasticsearch:
     runs-on: ubuntu-latest

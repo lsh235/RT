@@ -188,9 +188,10 @@ class EmbeddingProfileTests(unittest.TestCase):
              mock.patch.object(embeddings, "_model_cache_root", return_value=Path(tempfile.gettempdir())):
             with self.assertRaises(ElasticsearchError) as caught:
                 embeddings._model(embeddings.DEFAULT_PROFILE_ID, local_files_only=True)
+            status = embeddings.runtime_status()
         self.assertNotIn("secret", str(caught.exception))
         self.assertNotIn("private", str(caught.exception))
-        self.assertEqual(embeddings.runtime_status()["status"], "loading_failure")
+        self.assertEqual(status["status"], "loading_failure")
 
 
 if __name__ == "__main__":
